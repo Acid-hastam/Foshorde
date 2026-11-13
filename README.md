@@ -1,60 +1,84 @@
 # Foshorde
 
-A colorful Windows `.bat` video compressor built on ffmpeg. Give it a target size in MB and it compresses your videos to H.265 (HEVC) at about that size.
+<p align="center">
+  <strong>Minimal. Fast. Efficient.</strong><br>
+  A Windows video compressor powered by FFmpeg.
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/version-1.2.0-8BEA55?style=flat-square" alt="Version 1.2.0">
+  <img src="https://img.shields.io/badge/platform-Windows-8BEA55?style=flat-square" alt="Windows">
+  <img src="https://img.shields.io/badge/codec-H.265%20%2F%20HEVC-8BEA55?style=flat-square" alt="H.265 / HEVC">
+  <img src="https://img.shields.io/badge/license-MIT-8BEA55?style=flat-square" alt="MIT License">
+</p>
+
+Foshorde compresses videos to a target file size using H.265 (HEVC). It detects available hardware encoders, adjusts encoding settings when needed, and includes a command-line mode for quick compression.
 
 ## Features
-- Target size in MB (default 35); audio is copied untouched when possible
-- Auto-detects your GPU: NVIDIA (`hevc_nvenc`), AMD (`hevc_amf`), Intel (`hevc_qsv`), falls back to CPU (`libx265`)
-- HDR and 10-bit videos are encoded on the CPU
-- Re-encodes once with a corrected bitrate if the result misses the target size
-- Automatic retry ladder if an encode fails: without subtitles, then audio as AAC, then on the CPU
-- Works with files of any realistic size (no 2 GB limit)
-- Progress bars for the current file and for all files together
-- Safe: the original is only deleted after a successful, smaller, valid output that was moved into place
-- Fast downloads: ffmpeg and updates are fetched over several parallel connections (falls back to curl automatically)
-- Built-in updater that pulls the latest version from GitHub
-- Color themes: acid, dracula, nord, monokai, catppuccin, murphy
 
-## Install
+- Set a target output size in MB
+- Automatic GPU encoder detection: NVIDIA NVENC, AMD AMF, and Intel Quick Sync
+- CPU encoding fallback with `libx265`
+- HDR and 10-bit video support through CPU encoding
+- Automatic retry options when an encode fails
+- Bitrate correction when the output misses the target size
+- Progress indicators for individual files and the full queue
+- Built-in updater and parallel downloads
+- Six color themes: Acid, Dracula, Nord, Monokai, Catppuccin, and Murphy
+
+## Installation
+
 1. Download or clone this repository.
-2. Run `Foshorde.bat`. If ffmpeg is missing it offers to download it into `bin\`.
+2. Run `Foshorde.bat`.
+3. If FFmpeg is not installed, Foshorde can download it into `bin\`.
 
 ## Usage
-**Double-click** `Foshorde.bat` in a folder with videos: Enter compresses everything to the default size, a number sets another size, `R` asks per file, `T` changes theme, `U` updates, `Q` quits. Compressed files go to `feshorde-shod\` and originals are replaced.
 
-**From any folder** (after the first run adds Foshorde to your PATH; open a new terminal):
+Run `Foshorde.bat` in the folder containing your videos.
+
+| Key | Action |
+| --- | --- |
+| `Enter` | Compress using the default target size |
+| Number | Set a custom target size in MB |
+| `R` | Choose a target size for each file |
+| `T` | Change the color theme |
+| `U` | Update Foshorde |
+| `Q` | Quit |
+
+### Command line
+
+After the first run registers Foshorde on your PATH, open a new terminal:
+
+```bat
+foshorde kon        Compress videos in the current folder
+foshorde kon 50     Target approximately 50 MB per video
+foshorde update     Download the latest version
+foshorde version    Show the installed version
+foshorde path       Register this copy on PATH
 ```
-foshorde kon        compress every video here (default size)
-foshorde kon 50     ... to 50 MB
-foshorde update     download the latest version from GitHub and replace this install
-foshorde version    show the installed version
-foshorde path       re-register this copy of Foshorde on PATH
-```
-Output of `kon` is saved next to the originals as `name_foshorde.mp4`; originals are never deleted.
+
+The `kon` command saves compressed videos beside the originals with the `_foshorde.mp4` suffix. It does not delete the originals.
+
+## Output and safety
+
+When using the interactive `Foshorde.bat` mode, output files are placed in `feshorde-shod\`. The original is replaced only after the new file passes validation and is smaller.
 
 ## Updating
-Foshorde checks `version.txt` on GitHub once a day (set `check_updates=0` in `Foshorde.bat` to turn that off). When a newer version exists the start screen shows it; press `U` (or run `foshorde update`) to install it.
 
-The updater downloads the repository zip over HTTPS, waits for Foshorde to close, and copies the new files over the old ones. It keeps your `theme.cfg`, the `bin\` folder and the output folder. Settings you edited at the top of `Foshorde.bat` are reset to the defaults of the new version.
+Foshorde checks GitHub for updates once a day. When an update is available, press `U` on the start screen or run:
 
-### Publishing a new version (maintainer)
-1. Change the code and commit.
-2. Raise the number in `version.txt` (for example `1.1.0` to `1.2.0`).
-3. Push to the branch set in `Foshorde.bat` (`gh_branch`, default `main`).
+```bat
+foshorde update
+```
 
-Users with an older `version.txt` will be offered the update. The GitHub account, repository and branch are set by `gh_user`, `gh_repo` and `gh_branch` at the top of `Foshorde.bat`.
+The updater keeps your `theme.cfg`, `bin\` folder, and output folder. Settings manually changed inside `Foshorde.bat` return to the new version's defaults after updating.
 
-## Downloads
-ffmpeg and updates are downloaded with up to 8 parallel connections, which helps a lot when a server limits the speed of each single connection. If the server does not support ranged requests, the file is too small, or a part fails, Foshorde falls back to a normal `curl` download.
+## Requirements
 
-Change `dl_conn` at the top of `Foshorde.bat` (2-16 connections, `1` = single normal download). If downloads stay slow, download `ffmpeg.exe` and `ffprobe.exe` yourself and put them in `bin\`.
-
-## Notes
-- Windows 10/11 with ANSI colors (Windows Terminal recommended)
-- File names that contain `!`, `%` or `^` cannot be handled safely by batch files; they are skipped with a warning
-- If `foshorde` is not found after the first run, open a NEW terminal. To force the PATH registration again run `Foshorde.bat path`; it reports an error with details if it fails
-- `foshorde path` only removes old copies of Foshorde from your PATH. Your original PATH is saved once in `%LOCALAPPDATA%\Foshorde\path-backup.txt`
-- ffmpeg builds are not part of this repository; see their own licenses
+- Windows 10 or 11
+- FFmpeg and FFprobe (Foshorde can download them automatically)
+- A supported GPU is optional; CPU encoding is available as a fallback
 
 ## License
-MIT
+
+Foshorde is released under the [MIT License](LICENSE).
