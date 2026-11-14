@@ -5,9 +5,10 @@ chcp 65001 >nul
 :: Version comes from version.txt (single source of truth, also used by the updater)
 set "VERSION=0.0.0"
 if exist "%~dp0version.txt" set /p VERSION=<"%~dp0version.txt"
-title Foshorde v!VERSION! - Video Compressor
+title Foshorde v!VERSION!
 
-:: "foshorde kon [MB]" = quiet mode for any folder (no screen clearing, originals kept)
+:: "foshorde kon [MB|preset]" = quiet mode for any folder (no screen clearing, originals kept)
+::     presets: discord (10 MB), whatsapp (16 MB), mail (25 MB)
 set "kon=0"
 if /i "%~1"=="kon" set "kon=1"
 set "kon_mb=%~2"
@@ -29,14 +30,17 @@ set "script_dir=%~dp0"
 :: "Run as administrator" starts in System32 - move back to the script folder
 if /i "%cd%"=="%windir%\System32" cd /d "%script_dir%"
 
-:: ================= Settings =================
+:: ================= Default settings =================
+:: These are only the DEFAULTS. Your own choices are saved by the Options menu in
+:: %LOCALAPPDATA%\Foshorde\settings.cfg and survive updates.
 set "output_dir=feshorde-shod"
 set "default_mb=35"
 set "cpu_preset=medium"
 set "min_kbps=100"
 :: Encoder: auto / nvenc / amf / qsv / cpu
-:: auto = detect the graphics card and use its encoder (NVIDIA, AMD, Intel), else CPU
 set "force_encoder=auto"
+:: 1 = keep the original file after a successful compression (interactive mode)
+set "keep_originals=0"
 :: Check GitHub for a new version once a day (1 = yes, 0 = no)
 set "check_updates=1"
 :: Parallel connections for downloads (ffmpeg, updates). 1 = single normal download, 2-16 = split the file
@@ -45,11 +49,13 @@ set "dl_conn=8"
 set "gh_user=Acid-hastam"
 set "gh_repo=Foshorde"
 set "gh_branch=main"
-:: ============================================
+:: ====================================================
 
 set "SELF=%~f0"
+set "cfgdir=%LOCALAPPDATA%\Foshorde"
 set "gh_raw=https://raw.githubusercontent.com/!gh_user!/!gh_repo!/!gh_branch!/version.txt"
 set "gh_zip=https://github.com/!gh_user!/!gh_repo!/archive/refs/heads/!gh_branch!.zip"
+call :load_settings
 call :load_theme
 
 :: ---- Locate ffmpeg / ffprobe (already on PATH -> use as is, else bin\, else script folder) ----
@@ -84,7 +90,7 @@ if not defined FFPROBE (
 )
 
 :: ---- Put ffmpeg and the "foshorde" command on PATH (once) ----
-if "!pth!"=="1" if exist "%LOCALAPPDATA%\Foshorde\path.ok" del /f /q "%LOCALAPPDATA%\Foshorde\path.ok"
+if "!pth!"=="1" if exist "%cfgdir%\path.ok" del /f /q "%cfgdir%\path.ok"
 call :ensure_path
 if "!pth!"=="1" goto :path_done
 
@@ -101,10 +107,17 @@ if !total! equ 0 goto :no_videos
 :ask_target
 set "target_mb="
 set "ask_each=0"
-echo !GRN!  Enter!RST! = compress all !total! file^(s^) to !BLD!!WHT!!default_mb! MB!RST!
-echo !GRY!  or type a size in MB   !MAG!R!GRY!=review each file   !BLU!T!GRY!=theme   !GRN!U!GRY!=update   !RED!Q!GRY!=quit!RST!
+echo !GRN!  Enter!RST!  compress !total! file^(s^) to !BLD!!WHT!!default_mb! MB!RST!
+echo.
+echo !GRY!  type a size in MB    !MAG!R!GRY! review    !CYN!O!GRY! options    !RED!Q!GRY! quit!RST!
 echo.
 set /p "target_mb=!YEL!  > !RST!"
+if /i "!target_mb!"=="O" (
+    call :options_menu
+    if "!opt_go!"=="update" goto :do_update
+    goto :start_screen
+)
+:: hidden shortcuts kept for old habits
 if /i "!target_mb!"=="T" (
     call :open_themes
     goto :start_screen
@@ -142,7 +155,7 @@ if exist "!results!" del /f /q "!results!"
 set "quit=0"
 if "!ask_each!"=="0" (
     echo.
-    echo !GRY!  Compressing all files at !target_mb! MB - press Ctrl+C to stop.!RST!
+    echo !GRY!  Compressing at !target_mb! MB - Ctrl+C to stop.!RST!
 )
 call :build_list
 if !total! equ 0 (
@@ -168,9 +181,7 @@ if exist "!listfile!" del /f /q "!listfile!" >nul 2>&1
 :: =====================================================
 if "!kon!"=="0" cls
 echo.
-echo !CYN!  ======================================================================!RST!
-echo !CYN!  ^|!RST!!BLD!!WHT!                      F O S H O R D E   -   R E P O R T                 !RST!!CYN!^|!RST!
-echo !CYN!  ======================================================================!RST!
+echo !BLD!!WHT!  Report!RST!
 echo.
 
 if exist "!results!" (
@@ -195,32 +206,26 @@ echo.
 set /a pct_total=0
 if !sum_old! gtr 0 set /a pct_total=(sum_old-sum_new)*100/sum_old
 
-echo !BLD!!WHT!   SUMMARY!RST!
-echo !CYN!  ----------------------------------------------------------------------!RST!
-echo    !GRN!Success       :!RST! !ok!
-echo    !YEL!Skipped       :!RST! !skipped!
-echo    !RED!Failed        :!RST! !fail!
-echo.
-echo    !GRY!Total before  :!RST! !sum_old! MB
-echo    !GRY!Total after   :!RST! !sum_new! MB
-echo    !CYN!Space saved   :!RST! !BLD!!GRN!!saved_mb! MB!RST!  !GRY!^(!pct_total!%%^)!RST!
-echo !CYN!  ----------------------------------------------------------------------!RST!
+echo   !GRN!!ok! done!RST!    !YEL!!skipped! skipped!RST!    !RED!!fail! failed!RST!
+echo   !GRY!!sum_old! MB -^> !sum_new! MB!RST!    !BLD!!GRN!saved !saved_mb! MB!RST! !GRY!^(!pct_total!%%^)!RST!
 echo.
 if !fail! gtr 0 (
-    echo !RED!   Some files failed. Originals were kept untouched.!RST!
+    echo !RED!  Some files failed. Their originals were kept untouched.!RST!
 ) else if !ok! gtr 0 (
     if "!kon!"=="1" (
-        echo !GRN!   All done. Saved next to the originals as *_foshorde.mp4 - originals kept.!RST!
+        echo !GRN!  Saved next to the originals as *_foshorde.mp4 - originals kept.!RST!
+    ) else if "!keep_originals!"=="1" (
+        echo !GRN!  Compressed files are in %output_dir% - originals kept.!RST!
     ) else (
-        echo !GRN!   All done. Compressed files are in %output_dir%.!RST!
+        echo !GRN!  Compressed files are in %output_dir%.!RST!
     )
 ) else (
-    echo !YEL!   Nothing was compressed.!RST!
+    echo !YEL!  Nothing was compressed.!RST!
 )
 echo.
 if "!kon!"=="1" goto :kon_exit
 set "k="
-set /p "k=!GRY!  Press O to open the output folder, or Enter to exit: !RST!"
+set /p "k=!GRY!  O = open output folder, Enter = exit: !RST!"
 if /i "!k!"=="O" start "" explorer "%output_dir%"
 echo !ESC![0m
 cls
@@ -233,32 +238,140 @@ exit /b 0
 echo !YEL!  No video files found in this folder.!RST!
 echo.
 set "k="
-set /p "k=!GRY!  Press T to change theme, or Enter to exit: !RST!"
-if /i not "!k!"=="T" (
+set /p "k=!GRY!  O = options, Enter = exit: !RST!"
+if /i not "!k!"=="O" (
     echo !ESC![0m
     endlocal
     exit /b 0
 )
-call :open_themes
+call :options_menu
+if "!opt_go!"=="update" goto :do_update
 goto :start_screen
 
 
 :: =====================================================
-:: Card / encoder info lines (shared by the normal and kon screens)
+:: Encoder info (shared by the normal and kon screens) - one quiet line
 :: =====================================================
 :show_info
-echo !GRY!  Card    :!RST! !GPU_NAMES!
 if "!ENC!"=="cpu" (
-    echo !GRY!  Encoder :!RST! !YEL!!ENC_LABEL!!RST!
+    echo !GRY!  !YEL!!ENC_LABEL!!RST!!GRY!  -  v!VERSION!!RST!
 ) else (
-    echo !GRY!  Encoder :!RST! !GRN!!ENC_LABEL!!RST!
+    echo !GRY!  !GRN!!ENC_LABEL!!RST!!GRY!  -  v!VERSION!!RST!
 )
-echo !GRY!  Version :!RST! v!VERSION!
-if defined UPD_NOTE echo !YEL!  [UPDATE]!RST! !GRY!v!UPD_NOTE! is available - press!RST! !WHT!U!RST!
-if "!NO_GPU_WARN!"=="1" echo !GRY!            No usable GPU encoder - using CPU ^(slower^). Update the graphics driver.!RST!
-if defined PATH_MSG echo !GRN!  [OK]!RST! !GRY!Added to your PATH. Open a NEW terminal and type:!RST! !WHT!foshorde kon!RST!
+if defined UPD_NOTE echo !YEL!  update v!UPD_NOTE! available!RST! !GRY!^(O -^> Check for updates^)!RST!
+if "!NO_GPU_WARN!"=="1" echo !GRY!  no usable GPU encoder - using CPU ^(slower^). Update the graphics driver.!RST!
+if defined PATH_MSG echo !GRN!  added to PATH!RST! !GRY!- open a NEW terminal and type: foshorde kon!RST!
 set "PATH_MSG="
 echo.
+exit /b 0
+
+
+:: =====================================================
+:: Options menu. Sets opt_go=update when the user wants to update
+:: (the update must be reached with GOTO, never CALL).
+:: =====================================================
+:options_menu
+set "opt_go="
+:opt_draw
+cls
+call "%script_dir%themes\themes.bat" logo
+set "keep_txt=no"
+if "!keep_originals!"=="1" set "keep_txt=yes"
+echo !WHT!  Options!RST!
+echo.
+echo !CYN!  1!RST!  Theme                !GRY!!theme!!RST!
+echo !CYN!  2!RST!  Default size         !GRY!!default_mb! MB!RST!
+echo !CYN!  3!RST!  Encoder              !GRY!!force_encoder!!RST!
+echo !CYN!  4!RST!  Keep originals       !GRY!!keep_txt!!RST!
+echo !CYN!  5!RST!  Check for updates    !GRY!v!VERSION!!RST!
+echo !CYN!  6!RST!  Open output folder
+echo.
+echo !GRY!  Enter  back!RST!
+echo.
+set "o="
+set /p "o=!YEL!  > !RST!"
+if not defined o exit /b 0
+if "!o!"=="1" (
+    call :open_themes
+    goto :opt_draw
+)
+if "!o!"=="2" (
+    set "v="
+    set /p "v=!GRY!  New default size in MB: !RST!"
+    if defined v (
+        set "chk="
+        for /f "delims=0123456789" %%x in ("!v!") do set "chk=%%x"
+        if not defined chk if !v! geq 1 (
+            set "default_mb=!v!"
+            call :save_settings
+        )
+    )
+    goto :opt_draw
+)
+if "!o!"=="3" (
+    set "v="
+    set /p "v=!GRY!  Encoder ^(auto / nvenc / amf / qsv / cpu^): !RST!"
+    set "okenc="
+    for %%k in (auto nvenc amf qsv cpu) do if /i "!v!"=="%%k" set "okenc=%%k"
+    if defined okenc (
+        set "force_encoder=!okenc!"
+        call :save_settings
+        call :detect_encoder
+    )
+    goto :opt_draw
+)
+if "!o!"=="4" (
+    if "!keep_originals!"=="1" (set "keep_originals=0") else set "keep_originals=1"
+    call :save_settings
+    goto :opt_draw
+)
+if "!o!"=="5" (
+    set "opt_go=update"
+    exit /b 0
+)
+if "!o!"=="6" (
+    if not exist "%output_dir%" mkdir "%output_dir%"
+    start "" explorer "%output_dir%"
+    goto :opt_draw
+)
+goto :opt_draw
+
+
+:: =====================================================
+:: Settings: %LOCALAPPDATA%\Foshorde\settings.cfg (key=value). Never touched by updates.
+:: =====================================================
+:load_settings
+set "sfile=!cfgdir!\settings.cfg"
+if exist "!sfile!" for /f "usebackq tokens=1,* delims==" %%a in ("!sfile!") do (
+    if /i "%%a"=="default_mb"      set "default_mb=%%b"
+    if /i "%%a"=="force_encoder"   set "force_encoder=%%b"
+    if /i "%%a"=="keep_originals"  set "keep_originals=%%b"
+    if /i "%%a"=="cpu_preset"      set "cpu_preset=%%b"
+    if /i "%%a"=="check_updates"   set "check_updates=%%b"
+)
+:: sanity checks so a hand-edited file cannot break the program
+set "chk="
+for /f "delims=0123456789" %%x in ("!default_mb!") do set "chk=%%x"
+if defined chk set "default_mb=35"
+if not defined default_mb set "default_mb=35"
+if "!default_mb!"=="0" set "default_mb=35"
+if not "!keep_originals!"=="1" set "keep_originals=0"
+if not "!check_updates!"=="0" set "check_updates=1"
+set "okenc="
+for %%k in (auto nvenc amf qsv cpu) do if /i "!force_encoder!"=="%%k" set "okenc=%%k"
+if not defined okenc set "okenc=auto"
+set "force_encoder=!okenc!"
+exit /b 0
+
+:save_settings
+if not exist "!cfgdir!" mkdir "!cfgdir!"
+(
+    echo default_mb=!default_mb!
+    echo force_encoder=!force_encoder!
+    echo keep_originals=!keep_originals!
+    echo cpu_preset=!cpu_preset!
+    echo check_updates=!check_updates!
+) >"!cfgdir!\settings.cfg"
 exit /b 0
 
 
@@ -302,7 +415,8 @@ set "FSH_DST=!script_dir:~0,-1!"
 echo !GRN!  [OK]!RST! Downloaded. Installing in a separate window...
 echo !ESC![0m
 :: A running .bat must not overwrite itself, so a helper window waits for this one to exit,
-:: copies the new files over the old ones (keeping theme.cfg, bin and the output folder), then cleans up.
+:: then copies ALL new files (program, themes, readme) over the old ones. Your theme and settings
+:: live in %LOCALAPPDATA%\Foshorde, so they are untouched. bin and the output folder are kept.
 start "Foshorde update" powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Sleep -Seconds 3; try { Expand-Archive -LiteralPath $env:FSH_ZIP -DestinationPath $env:FSH_TMPD -Force; $f = Get-ChildItem -LiteralPath $env:FSH_TMPD -Recurse -Filter Foshorde.bat | Select-Object -First 1; if (-not $f) { throw 'Foshorde.bat not found in the downloaded archive' }; robocopy $f.DirectoryName $env:FSH_DST /E /XF theme.cfg /XD bin feshorde-shod .git /NFL /NDL /NJH /NJS /NP | Out-Null; if ($LASTEXITCODE -ge 8) { throw ('robocopy failed, code ' + $LASTEXITCODE) }; Remove-Item -LiteralPath (Join-Path $env:LOCALAPPDATA 'Foshorde\lastcheck.txt') -Force -ErrorAction SilentlyContinue; Write-Host 'Update installed. Start Foshorde again.' -ForegroundColor Green } catch { Write-Host ('Update failed: ' + $_) -ForegroundColor Red } finally { Remove-Item -LiteralPath $env:FSH_ZIP,$env:FSH_TMPD -Recurse -Force -ErrorAction SilentlyContinue }; Read-Host 'Press Enter to close'"
 exit /b 0
 
@@ -337,7 +451,7 @@ exit /b 0
 :auto_check
 set "UPD_NOTE="
 if not "!check_updates!"=="1" exit /b 0
-set "stamp=%LOCALAPPDATA%\Foshorde\lastcheck.txt"
+set "stamp=%cfgdir%\lastcheck.txt"
 set "today=%date%"
 set "c_day="
 set "c_res="
@@ -350,7 +464,7 @@ if exist "!stamp!" for /f "usebackq tokens=1-3 delims=|" %%a in ("!stamp!") do (
 if not "!c_day!"=="!today!" (
     set "chk_to=4"
     call :check_update
-    if not exist "%LOCALAPPDATA%\Foshorde" mkdir "%LOCALAPPDATA%\Foshorde"
+    if not exist "%cfgdir%" mkdir "%cfgdir%"
     >"!stamp!" echo !today!^|!upd_res!^|!upd_ver!
     set "c_res=!upd_res!"
     set "c_ver=!upd_ver!"
@@ -435,9 +549,9 @@ if not "!FFMPEG!"=="ffmpeg" for %%i in ("!FFMPEG!") do set "ffdir=%%~dpi"
 if defined ffdir if "!ffdir:~-1!"=="\" set "ffdir=!ffdir:~0,-1!"
 set "sig=!root!|!ffdir!"
 set "marked="
-if exist "%LOCALAPPDATA%\Foshorde\path.ok" set /p marked=<"%LOCALAPPDATA%\Foshorde\path.ok"
+if exist "%cfgdir%\path.ok" set /p marked=<"%cfgdir%\path.ok"
 if /i "!marked!"=="!sig!" exit /b 0
-if not exist "%LOCALAPPDATA%\Foshorde" mkdir "%LOCALAPPDATA%\Foshorde"
+if not exist "%cfgdir%" mkdir "%cfgdir%"
 set "FSH_ROOT=!root!"
 set "FSH_FFDIR=!ffdir!"
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$u=[Environment]::GetEnvironmentVariable('Path','User'); if($u -eq $null){$u=''}; $bk=Join-Path $env:LOCALAPPDATA 'Foshorde\path-backup.txt'; if(-not (Test-Path -LiteralPath $bk)){ Set-Content -LiteralPath $bk -Value $u }; $p=@($u -split ';' | Where-Object { $_ -ne '' -and -not (($_.TrimEnd('\') -ine $env:FSH_ROOT) -and (Test-Path -LiteralPath ($_ + '\Foshorde.bat'))) }); foreach($d in @($env:FSH_ROOT,$env:FSH_FFDIR)){ if($d -and -not ($p | Where-Object { $_.TrimEnd('\') -ieq $d })){ $p += $d } }; [Environment]::SetEnvironmentVariable('Path',($p -join ';'),'User')" >"%TEMP%\foshorde-path.log" 2>&1
@@ -449,7 +563,7 @@ if errorlevel 1 (
     if exist "%TEMP%\foshorde-path.log" type "%TEMP%\foshorde-path.log"
     exit /b 0
 )
->"%LOCALAPPDATA%\Foshorde\path.ok" echo !sig!
+>"%cfgdir%\path.ok" echo !sig!
 set "PATH_MSG=1"
 exit /b 0
 
@@ -522,7 +636,7 @@ exit /b 0
 
 
 :: =====================================================
-:: "foshorde kon [MB]" - compress every video in the current folder.
+:: "foshorde kon [MB|preset]" - compress every video in the current folder.
 :: Output: <name>_foshorde.mp4 next to the original. Originals are never deleted.
 :: =====================================================
 :kon_start
@@ -536,10 +650,13 @@ if !total! equ 0 (
 )
 set "target_mb=!default_mb!"
 if defined kon_mb (
+    if /i "!kon_mb!"=="discord"  set "kon_mb=10"
+    if /i "!kon_mb!"=="whatsapp" set "kon_mb=16"
+    if /i "!kon_mb!"=="mail"     set "kon_mb=25"
     set "chk="
     for /f "delims=0123456789" %%x in ("!kon_mb!") do set "chk=%%x"
     if defined chk (
-        echo !RED!  Size must be a whole number - using !default_mb! MB.!RST!
+        echo !RED!  Size must be a whole number or a preset - using !default_mb! MB.!RST!
     ) else if !kon_mb! geq 1 (
         set "target_mb=!kon_mb!"
     )
@@ -576,11 +693,17 @@ exit /b 0
 
 
 :: =====================================================
-:: Theme helpers
+:: Theme helpers. The chosen theme is stored in %LOCALAPPDATA%\Foshorde\theme.cfg,
+:: so updating the program (which replaces themes\) never changes your choice.
 :: =====================================================
 :load_theme
 set "theme=acid"
-if exist "%script_dir%themes\theme.cfg" set /p theme=<"%script_dir%themes\theme.cfg"
+:: one-time migration from the old location (themes\theme.cfg)
+if not exist "%cfgdir%\theme.cfg" if exist "%script_dir%themes\theme.cfg" (
+    if not exist "%cfgdir%" mkdir "%cfgdir%"
+    copy /y "%script_dir%themes\theme.cfg" "%cfgdir%\theme.cfg" >nul
+)
+if exist "%cfgdir%\theme.cfg" set /p theme=<"%cfgdir%\theme.cfg"
 call "%script_dir%themes\themes.bat" !theme!
 echo !RST!
 exit /b 0
@@ -593,7 +716,7 @@ if not exist "%script_dir%themes\theme-selector.bat" (
 )
 call "%script_dir%themes\theme-selector.bat"
 mode con cols=90 lines=40
-title Foshorde v!VERSION! - Video Compressor
+title Foshorde v!VERSION!
 call :load_theme
 cls
 call "%script_dir%themes\themes.bat" logo
@@ -610,7 +733,7 @@ call :show_info
 set /a total=0
 for %%f in (*.mp4 *.mkv *.avi *.mov *.wmv *.flv *.webm *.m4v *.ts) do set /a total+=1
 if !total! gtr 0 (
-    echo !WHT!  Found !total! video file^(s^) in this folder.!RST!
+    echo !WHT!  !total! video file^(s^) in this folder!RST!
     echo.
 )
 exit /b 0
@@ -623,6 +746,7 @@ exit /b 0
 set "ENC="
 set "ENC_LABEL="
 set "GPU_NAMES="
+set "NO_GPU_WARN=0"
 set "has_nv=0"
 set "has_amd=0"
 set "has_intel=0"
@@ -648,7 +772,7 @@ if "!has_intel!"=="1" set "enc_list=!enc_list! qsv"
 :: If Windows could not tell us the card, try all of them
 if "!gpu_found!"=="0" set "enc_list=nvenc amf qsv"
 
-:: Manual override from the settings at the top
+:: Manual override (Options menu / settings.cfg)
 if /i "!force_encoder!"=="nvenc" set "enc_list=nvenc"
 if /i "!force_encoder!"=="amf"   set "enc_list=amf"
 if /i "!force_encoder!"=="qsv"   set "enc_list=qsv"
@@ -660,8 +784,7 @@ if defined enc_list (
 
 if not defined ENC (
     set "ENC=cpu"
-    set "ENC_LABEL=CPU libx265 (no GPU encoder in use)"
-    set "NO_GPU_WARN=0"
+    set "ENC_LABEL=CPU libx265"
     if /i not "!force_encoder!"=="cpu" set "NO_GPU_WARN=1"
 )
 exit /b 0
@@ -679,9 +802,9 @@ if not "!errorlevel!"=="0" (
     exit /b 0
 )
 set "ENC=%1"
-if /i "%1"=="nvenc" set "ENC_LABEL=NVIDIA NVENC (hevc_nvenc)"
-if /i "%1"=="amf"   set "ENC_LABEL=AMD AMF (hevc_amf)"
-if /i "%1"=="qsv"   set "ENC_LABEL=Intel Quick Sync (hevc_qsv)"
+if /i "%1"=="nvenc" set "ENC_LABEL=NVIDIA NVENC"
+if /i "%1"=="amf"   set "ENC_LABEL=AMD AMF"
+if /i "%1"=="qsv"   set "ENC_LABEL=Intel Quick Sync"
 exit /b 0
 
 
@@ -710,8 +833,8 @@ exit /b 0
 
 :: =====================================================
 :show_file_header
-echo !GRY!  ------------------------------------------------------!RST!
-echo !BLD!!WHT!  [!idx!/!total!]!RST! !MAG!!in!!RST!
+echo.
+echo !GRY!  [!idx!/!total!]!RST! !WHT!!in!!RST!
 exit /b 0
 
 
@@ -802,24 +925,18 @@ set /a maxk=vkbps*3/2
 set /a bufk=maxk*2
 set /a est_mb=(vkbps+abr_k)/8*dur/1024
 
-echo.
-echo    !GRY!Size    :!RST! !old_mb! MB  !GRY!-^>!RST!  !GRN!~!est_mb! MB!RST!  !GRY!^(target !target_mb! MB, +/- 15%%^)!RST!
-echo    !GRY!Bitrate :!RST! !vkbps! kbps video + !abr_k! kbps audio ^(copied^)  !GRY!!dur! s!RST!
-if "!is_hdr!"=="1" (
-    echo    !GRY!Encoder :!RST! !YEL!CPU libx265 10-bit ^(HDR^)!RST!
-) else if "!is10!"=="1" (
-    echo    !GRY!Encoder :!RST! !YEL!CPU libx265 10-bit!RST!
-) else if "!use_cpu!"=="1" (
-    echo    !GRY!Encoder :!RST! !YEL!CPU libx265!RST!
-) else (
-    echo    !GRY!Encoder :!RST! !CYN!!ENC_LABEL!!RST!
-)
+set "enc_tag=CPU libx265"
+if "!is10!"=="1" set "enc_tag=CPU libx265 10-bit"
+if "!is_hdr!"=="1" set "enc_tag=CPU libx265 10-bit HDR"
+
+echo    !GRY!!old_mb! MB -^>!RST! !GRN!~!est_mb! MB!RST!  !GRY!^(target !target_mb! MB^)  !vkbps! kbps - !dur!s!RST!
+:: the GPU is the normal case and already shown at the top - only mention the CPU path
+if "!use_cpu!"=="1" if not "!ENC!"=="cpu" echo    !YEL!!enc_tag!!RST!
 if !est_mb! geq !old_mb! echo    !YEL![NOTE] Estimated size is not smaller than the original.!RST!
-echo.
 
 if "!ask_each!"=="0" goto :encode
 
-echo !GRN!  Enter!RST!=compress  !RED!N!RST!=skip  !CYN!A!RST!=all remaining  !BLU!T!RST!=theme  !GRY!Q!RST!=quit  !MAG!or type a new size in MB!RST!
+echo !GRY!  Enter compress   N skip   A all   Q quit   or type a new size in MB!RST!
 :prompt
 set "ans="
 set /p "ans=!YEL!  > !RST!"
@@ -836,29 +953,10 @@ if /i "!ans!"=="Q" (
     echo.
     exit /b 0
 )
-if /i "!ans!"=="T" (
-    call :open_themes
-    call :show_file_header
-    goto :calc
-)
 set "chk="
 for /f "delims=0123456789" %%x in ("!ans!") do set "chk=%%x"
 if not defined chk if !ans! geq 1 (
     set "target_mb=!ans!"
-    goto :calc
-)
-if /i "!ans!"=="C" (
-    set "newmb="
-    set /p "newmb=!YEL!  New target size in MB: !RST!"
-    set "chk="
-    for /f "delims=0123456789" %%x in ("!newmb!") do set "chk=%%x"
-    if defined chk (
-        echo !RED!  Invalid number.!RST!
-        goto :prompt
-    )
-    if not defined newmb goto :prompt
-    if !newmb! lss 1 goto :prompt
-    set "target_mb=!newmb!"
     goto :calc
 )
 goto :prompt
@@ -882,7 +980,6 @@ goto :encode_amf
 
 :: ---------- NVIDIA ----------
 :encode_nvenc
-echo !CYN!  Encoding on NVIDIA GPU...!RST!
 "%FFMPEG%" -hide_banner -loglevel fatal -nostats -progress pipe:1 -y -i "%in%" ^
     %maps_opt% ^
     -c:v hevc_nvenc -preset p5 -tune hq ^
@@ -895,7 +992,6 @@ goto :check
 
 :: ---------- AMD ----------
 :encode_amf
-echo !CYN!  Encoding on AMD GPU...!RST!
 "%FFMPEG%" -hide_banner -loglevel fatal -nostats -progress pipe:1 -y -i "%in%" ^
     %maps_opt% ^
     -c:v hevc_amf -usage transcoding -quality quality ^
@@ -908,7 +1004,6 @@ goto :check
 
 :: ---------- Intel ----------
 :encode_qsv
-echo !CYN!  Encoding on Intel GPU...!RST!
 "%FFMPEG%" -hide_banner -loglevel fatal -nostats -progress pipe:1 -y -i "%in%" ^
     %maps_opt% ^
     -c:v hevc_qsv -preset slower ^
@@ -921,7 +1016,6 @@ goto :check
 
 :: ---------- CPU ----------
 :encode_cpu
-echo !YEL!  Encoding on CPU...!RST!
 if "!is_hdr!"=="1" goto :encode_cpu_hdr
 "%FFMPEG%" -hide_banner -loglevel fatal -nostats -progress pipe:1 -y -i "%in%" ^
     %maps_opt% ^
@@ -1045,7 +1139,7 @@ if not exist "!dest!" (
     echo !RED!  Output is missing after the move - original kept.!RST!
     goto :failed
 )
-if "!kon!"=="0" del /f /q "!in!"
+if "!kon!"=="0" if not "!keep_originals!"=="1" del /f /q "!in!"
 set /a new_mb=new_kb/1024
 set /a d10=new_kb*10/1024
 set /a d_i=d10/10, d_f=d10%%10
