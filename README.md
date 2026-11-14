@@ -6,116 +6,100 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.2.0-8BEA55?style=flat-square" alt="Version 1.2.0">
+  <img src="https://img.shields.io/badge/version-1.3.0-8BEA55?style=flat-square" alt="Version 1.3.0">
   <img src="https://img.shields.io/badge/platform-Windows-8BEA55?style=flat-square" alt="Windows">
   <img src="https://img.shields.io/badge/codec-H.265%20%2F%20HEVC-8BEA55?style=flat-square" alt="H.265 / HEVC">
   <img src="https://img.shields.io/badge/license-MIT-8BEA55?style=flat-square" alt="MIT License">
 </p>
 
-Foshorde is a Windows video compressor that uses H.265 (HEVC) to target a chosen output file size. It detects available hardware encoders, falls back to CPU encoding when needed, and includes an interactive mode and a command-line workflow.
+Foshorde compresses videos with H.265 (HEVC) to a target file size. It detects your GPU encoder (NVIDIA NVENC, AMD AMF, Intel Quick Sync), falls back to the CPU when needed, and has both an interactive mode and a command line.
 
 ## Features
 
-- Choose a target output size in MB
-- Default target size: **35 MB**
-- Automatic GPU encoder detection: NVIDIA NVENC, AMD AMF, and Intel Quick Sync
-- CPU encoding fallback with `libx265`
-- HDR and 10-bit sources are processed through the CPU 10-bit encoding path
-- Audio tracks are copied instead of re-encoded
-- Subtitle streams are included when present and converted to MP4-compatible `mov_text`
-- Automatic retry ladder when an encode fails
-- Bitrate estimation and correction retry when the output misses the target
-- Progress display and a final per-file summary
-- Built-in updater and parallel downloads
-- Six color themes: Acid, Dracula, Nord, Monokai, Catppuccin, and Murphy
+- Target output size in MB (default **35 MB**, changeable in Options)
+- Automatic GPU encoder detection, CPU `libx265` fallback
+- HDR and 10-bit sources use the CPU 10-bit path
+- Audio is copied, subtitles become MP4-compatible `mov_text`
+- Automatic retry ladder when an encode fails, and a size-correction retry
+- Output is verified before anything is replaced
+- Options menu: theme, default size, encoder, keep originals, updates
+- Settings and theme are stored outside the program folder and **survive updates**
+- Built-in updater that also updates the themes
+- Six themes: Acid, Dracula, Nord, Monokai, Catppuccin, Murphy
 
 ## Supported formats
 
-Foshorde scans for these video file extensions:
-
-`MP4` · `MKV` · `AVI` · `MOV` · `WMV` · `FLV` · `WEBM` · `M4V` · `TS`
-
-Output is encoded as MP4 using H.265 (HEVC).
+`MP4` `MKV` `AVI` `MOV` `WMV` `FLV` `WEBM` `M4V` `TS` - output is always MP4 (H.265).
 
 ## Installation
 
 1. Download or clone this repository.
 2. Run `Foshorde.bat`.
-3. If FFmpeg or FFprobe is missing, Foshorde can download them into `bin\`.
+3. If FFmpeg is missing, Foshorde offers to download it into `bin\`.
 
-Foshorde requires Windows 10 or 11. A supported GPU is optional; CPU encoding is available as a fallback.
+Requires Windows 10 or 11. A GPU is optional.
 
 ## Usage
 
-Place `Foshorde.bat` in the folder containing your videos, then run it.
+Put `Foshorde.bat` in the folder with your videos and run it.
 
-The start screen accepts:
-
-| Key / input | Action |
+| Input | Action |
 | --- | --- |
-| `Enter` | Compress all detected videos using the default target size (35 MB) |
-| Number | Set a custom target size in MB for the batch |
-| `R` | Review files one by one and choose what to do |
-| `T` | Change the color theme |
-| `U` | Check for and install an available update |
+| `Enter` | Compress all videos to the default size |
+| Number | Compress all videos to this size (MB) |
+| `R` | Review files one by one |
+| `O` | Options |
 | `Q` | Quit |
 
-### Review files one by one
+### Review mode
 
-After pressing `R`, each file can be handled separately:
-
-| Key / input | Action |
+| Input | Action |
 | --- | --- |
-| `Enter` or `Y` | Compress this file |
+| `Enter` / `Y` | Compress this file |
 | `N` | Skip this file |
-| `A` | Compress this and all remaining files without asking again |
-| `T` | Change theme and return to the current file |
-| `Q` | Stop processing the remaining files |
-| Number | Change the target size for the current file |
+| `A` | Compress this and all remaining files |
+| `Q` | Stop |
+| Number | New target size for this file |
+
+### Options
+
+Theme, default size, encoder (`auto`, `nvenc`, `amf`, `qsv`, `cpu`), keep originals (yes/no), check for updates, open the output folder.
 
 ## Command line
 
-On the first run, Foshorde registers its command on your user PATH. Open a **new** terminal window after registration.
+On first run Foshorde adds itself to your user PATH. Open a **new** terminal afterwards.
 
 ```bat
-foshorde kon        Compress videos in the current folder
-foshorde kon 50     Target approximately 50 MB per video
-foshorde update     Download the latest version
-foshorde version    Show the installed version
-foshorde path       Register this copy on PATH
+foshorde kon              Compress videos in the current folder
+foshorde kon 50           Target about 50 MB per video
+foshorde kon discord      Presets: discord (10 MB), whatsapp (16 MB), mail (25 MB)
+foshorde update           Download the latest version
+foshorde version          Show the installed version
+foshorde path             Register this copy on PATH
 ```
 
-The `kon` command saves each result beside its source file with the `_foshorde.mp4` suffix. Original files are kept. If a matching output file already exists, that input is skipped.
+`kon` saves `<name>_foshorde.mp4` next to each source and never deletes anything. Files that already have a matching output are skipped, and `_foshorde` files are not processed again.
 
 ## Target size
 
-Foshorde estimates the video bitrate from the selected target size, duration, and audio bitrate. The interface displays an estimated output size and a **±15% target range**. Actual size can vary depending on the source and encoding constraints; very low target sizes may be limited by the minimum video bitrate.
+The video bitrate is calculated from the target size, duration and audio bitrate. If the first result misses the target, Foshorde re-encodes once with a corrected bitrate. Very small targets are limited by the minimum video bitrate.
 
 ## Output and file safety
 
-- Interactive mode saves results in the `feshorde-shod\` folder.
-- Command-line mode (`foshorde kon`) saves results next to the originals as `*_foshorde.mp4`.
-- Temporary files are used during encoding.
-- The new output is checked before it is accepted; failed encodes leave the original untouched.
-- Foshorde does not delete the original source videos.
+- Interactive mode writes to `feshorde-shod\`; `kon` writes next to the originals.
+- By default, interactive mode **deletes the original after a verified successful compression** (that is where the space saving comes from). Turn on **Keep originals** in Options to keep them.
+- Failed or suspicious encodes never touch the original.
 
-## Notes and limitations
+## Settings and updating
 
-- File names containing `!`, `%`, or `^` are currently skipped by the file scanner. Rename those files before processing.
-- The first video stream is selected. Audio streams are mapped and copied; subtitle streams are mapped when present and converted to `mov_text`.
-- HDR and 10-bit inputs use the CPU encoding path, which can take longer than supported GPU encoding.
-- GPU encoding speed and availability depend on your graphics card, driver, and FFmpeg build.
+Your choices are saved in `%LOCALAPPDATA%\Foshorde\` (`settings.cfg`, `theme.cfg`). Updating replaces the program and the themes with the new versions but never changes your settings or selected theme. The `bin\` and output folders are kept.
 
-## Updating
+## Limitations
 
-Foshorde checks GitHub for updates once a day. When an update is available, press `U` on the start screen or run:
-
-```bat
-foshorde update
-```
-
-The updater keeps your `theme.cfg`, `bin\` folder, and output folder. Settings manually changed inside `Foshorde.bat` return to the new version's defaults after updating.
+- File names containing `!`, `%` or `^` are skipped. Rename them first.
+- Only the first video stream is used.
+- HDR/10-bit inputs use the CPU, which is slower.
 
 ## License
 
-Foshorde is released under the [MIT License](LICENSE).
+MIT - see [LICENSE](LICENSE).

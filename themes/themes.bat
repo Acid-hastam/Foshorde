@@ -1,7 +1,7 @@
 @echo off
 :: Usage:
 ::   call themes.bat <name>   -> sets color variables (acid dracula nord monokai catppuccin murphy)
-::   call themes.bat logo     -> prints banner (pixel-art flask for acid, simple box for others)
+::   call themes.bat logo     -> prints banner (pixel-art for acid and murphy, one clean line for the others)
 :: IMPORTANT: save this file as UTF-8 (Notepad: Save As -> Encoding: UTF-8).
 
 for /f %%a in ('echo prompt $E ^| cmd') do set "ESC=%%a"
@@ -130,11 +130,7 @@ if /i "%CUR_THEME%"=="acid" goto :logo_acid
 if /i "%CUR_THEME%"=="murphy" goto :logo_murphy
 
 echo.
-echo %CYN%  ======================================================%RST%
-echo %CYN%  ^|%RST%%BLD%%WHT%        F O S H O R D E   -   Video Compressor      %RST%%CYN%^|%RST%
-echo %CYN%  ^|%RST%%GRY%          H.265 ^| GPU ^(auto^) + CPU for HDR            %RST%%CYN%^|%RST%
-echo %CYN%  ======================================================%RST%
-<nul set /p "=%RST%"
+echo   %BLD%%CYN%F O S H O R D E%RST%  %GRY%video compressor%RST%
 echo.
 exit /b 0
 
