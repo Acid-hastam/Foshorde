@@ -21,7 +21,7 @@ function getPresetIconInfo(name, iconKey) {
   if (iconKey && ICONS[iconKey]) {
     return { key: iconKey, svg: ICONS[iconKey] };
   }
-  const l = name.toLowerCase();
+  const l = (name || "").toLowerCase();
   if (l.includes("discord"))  return { key: "discord", svg: ICONS.discord };
   if (l.includes("what") || l.includes("wa")) return { key: "whatsapp", svg: ICONS.whatsapp };
   if (l.includes("tele") || l.includes("tg")) return { key: "telegram", svg: ICONS.telegram };
@@ -65,9 +65,12 @@ function savePresets() {
 // =============================================
 // DOM Elements
 // =============================================
-const dropRow        = document.getElementById("drop-row");
-const dropEmpty      = document.getElementById("drop-empty");
-const dropLoaded     = document.getElementById("drop-loaded");
+const dropView       = document.getElementById("drop-view");
+const dropCard       = document.getElementById("drop-card");
+const dropBrowseLink = document.getElementById("drop-browse-link");
+const editorView     = document.getElementById("editor-view");
+
+const dropBarChange  = document.getElementById("drop-bar-change");
 const fileCountBadge = document.getElementById("file-count-badge");
 const fileNameEl     = document.getElementById("file-name");
 const fileOrigSize   = document.getElementById("file-orig-size");
@@ -100,13 +103,17 @@ const btnOutFolder     = document.getElementById("btn-out-folder");
 const btnOpenOutFolder = document.getElementById("btn-open-out-folder");
 const outFolderLabel   = document.getElementById("out-folder-label");
 
-const settingsPresetList = document.getElementById("settings-preset-list");
-const newPresetName  = document.getElementById("new-preset-name");
-const newPresetVal   = document.getElementById("new-preset-val");
-const newModePct     = document.getElementById("new-mode-pct");
-const newModeMb      = document.getElementById("new-mode-mb");
-const btnAddPreset   = document.getElementById("btn-add-preset");
 const btnResetAll    = document.getElementById("btn-reset-all");
+const btnUpdateFfmpeg = document.getElementById("btn-update-ffmpeg");
+
+const overlayAddPreset    = document.getElementById("overlay-add-preset");
+const addPresetDragHead   = document.getElementById("add-preset-drag-head");
+const btnToggleAddPreset  = document.getElementById("btn-toggle-add-preset");
+const addPresetName       = document.getElementById("add-preset-name");
+const addModePct          = document.getElementById("add-mode-pct");
+const addModeMb           = document.getElementById("add-mode-mb");
+const addPresetVal        = document.getElementById("add-preset-val");
+const btnConfirmAddPreset = document.getElementById("btn-confirm-add-preset");
 
 // =============================================
 // Window Controls
@@ -167,6 +174,76 @@ function makeDraggable(dialogEl, handleEl) {
 
 makeDraggable(overlaySets, settingsDragHead);
 makeDraggable(overlayQueue, queueDragHead);
+if (overlayAddPreset && addPresetDragHead) {
+  makeDraggable(overlayAddPreset, addPresetDragHead);
+}
+
+// =============================================
+// Add Preset Dialog Controls
+// =============================================
+let addPresetTargetMode = "percent";
+if (addModePct && addModeMb) {
+  addModePct.addEventListener("click", () => {
+    addPresetTargetMode = "percent";
+    addModePct.classList.add("active");
+    addModeMb.classList.remove("active");
+    if (addPresetVal) {
+      addPresetVal.max = 99;
+      if (parseInt(addPresetVal.value, 10) > 99) addPresetVal.value = 25;
+    }
+  });
+
+  addModeMb.addEventListener("click", () => {
+    addPresetTargetMode = "fixed";
+    addModeMb.classList.add("active");
+    addModePct.classList.remove("active");
+    if (addPresetVal) {
+      addPresetVal.max = 9999;
+      if (parseInt(addPresetVal.value, 10) < 1) addPresetVal.value = 10;
+    }
+  });
+}
+
+btnToggleAddPreset?.addEventListener("click", () => {
+  if (overlayAddPreset.style.display === "flex") {
+    closeOverlay(overlayAddPreset);
+  } else {
+    openOverlay(overlayAddPreset);
+    addPresetName?.focus();
+  }
+});
+
+btnConfirmAddPreset?.addEventListener("click", () => {
+  const name = addPresetName?.value?.trim() || "Preset";
+  const num = parseFloat(addPresetVal?.value) || (addPresetTargetMode === "percent" ? 25 : 10);
+  const iconInfo = getPresetIconInfo(name);
+
+  const newPreset = {
+    id: Date.now(),
+    name,
+    mode: addPresetTargetMode,
+    val: num,
+    icon: iconInfo.key
+  };
+
+  presets.push(newPreset);
+  savePresets();
+
+  selectedTarget = {
+    presetId: newPreset.id,
+    mode: newPreset.mode,
+    val: newPreset.val,
+    label: newPreset.mode === "percent" ? `${newPreset.val}%` : `${newPreset.val} MB`
+  };
+
+  if (addPresetName) addPresetName.value = "";
+  if (addPresetVal) addPresetVal.value = addPresetTargetMode === "percent" ? 25 : 10;
+
+  closeOverlay(overlayAddPreset);
+  renderPresetGrid();
+  updateSizeDisplay();
+  updateStartBtn();
+});
 
 // =============================================
 // System Info
@@ -183,13 +260,105 @@ async function initSystem() {
 }
 
 // =============================================
-// Preset Grid Rendering (Main Workspace)
+// Preset Grid Rendering + Mouse Drag Reorder
 // =============================================
+let activeDragCard = null;
+let dragStartX = 0;
+let dragStartY = 0;
+let isDraggingCard = false;
+let justFinishedDrag = false;
+
+function setupPresetCardMouseDrag(card) {
+  card.addEventListener("mousedown", (e) => {
+    // If clicked on delete button or anything inside it, don't drag
+    if (e.target.closest(".btn-del-preset")) return;
+    if (e.button !== 0) return; // Left mouse button only
+
+    activeDragCard = card;
+    dragStartX = e.clientX;
+    dragStartY = e.clientY;
+    isDraggingCard = false;
+
+    const onMouseMove = (moveEvt) => {
+      if (!activeDragCard) return;
+      const dx = moveEvt.clientX - dragStartX;
+      const dy = moveEvt.clientY - dragStartY;
+
+      if (!isDraggingCard && Math.hypot(dx, dy) > 4) {
+        isDraggingCard = true;
+        activeDragCard.classList.add("dragging");
+        document.body.style.userSelect = "none";
+        document.body.style.cursor = "grabbing";
+      }
+
+      if (isDraggingCard) {
+        // Find what element is currently under the cursor
+        const elemUnder = document.elementFromPoint(moveEvt.clientX, moveEvt.clientY);
+        const targetCard = elemUnder?.closest(".preset-card");
+
+        if (targetCard && targetCard !== activeDragCard && targetCard.parentNode === presetGrid) {
+          const cards = Array.from(presetGrid.children);
+          const activeIdx = cards.indexOf(activeDragCard);
+          const targetIdx = cards.indexOf(targetCard);
+
+          if (activeIdx < targetIdx) {
+            presetGrid.insertBefore(activeDragCard, targetCard.nextSibling);
+          } else {
+            presetGrid.insertBefore(activeDragCard, targetCard);
+          }
+        }
+      }
+    };
+
+    const onMouseUp = () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+
+      if (isDraggingCard && activeDragCard) {
+        activeDragCard.classList.remove("dragging");
+        document.body.style.userSelect = "";
+        document.body.style.cursor = "";
+
+        // Persist new order
+        const newOrderIds = Array.from(presetGrid.querySelectorAll(".preset-card"))
+          .map((c) => parseInt(c.dataset.id, 10));
+        const reordered = [];
+        newOrderIds.forEach((id) => {
+          const p = presets.find((item) => item.id === id);
+          if (p) reordered.push(p);
+        });
+
+        if (reordered.length > 0) {
+          presets = reordered;
+          savePresets();
+        }
+
+        justFinishedDrag = true;
+        setTimeout(() => {
+          justFinishedDrag = false;
+        }, 80);
+      }
+
+      activeDragCard = null;
+      isDraggingCard = false;
+    };
+
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+  });
+}
+
 function renderPresetGrid() {
+  if (!presets || !presets.length) {
+    presets = JSON.parse(JSON.stringify(DEFAULT_PRESETS));
+    savePresets();
+  }
+
   presetGrid.innerHTML = presets.map((p) => {
     const valStr = p.mode === "percent" ? `${p.val}%` : `${p.val} MB`;
     const active = selectedTarget?.presetId === p.id ? "active" : "";
     const iconInfo = getPresetIconInfo(p.name, p.icon);
+    const canDelete = presets.length > 1;
 
     return `
     <div class="preset-card ${active}" data-id="${p.id}" title="${p.name} (${valStr})">
@@ -200,14 +369,23 @@ function renderPresetGrid() {
         <span class="pc-name">${p.name}</span>
         <span class="pc-val">${valStr}</span>
       </div>
+      ${canDelete ? `<button class="btn-del-preset" data-id="${p.id}" title="Delete ${p.name}">✕</button>` : ""}
     </div>`;
   }).join("");
 
   presetGrid.querySelectorAll(".preset-card").forEach((card) => {
-    card.addEventListener("click", () => {
+    // Attach mouse-based drag reorder
+    setupPresetCardMouseDrag(card);
+
+    // Click to select preset
+    card.addEventListener("click", (e) => {
+      if (e.target.closest(".btn-del-preset")) return;
+      if (justFinishedDrag) return;
+
       const id = parseInt(card.dataset.id, 10);
       const p  = presets.find((x) => x.id === id);
       if (!p) return;
+
       selectedTarget = {
         presetId: p.id,
         mode: p.mode,
@@ -220,152 +398,36 @@ function renderPresetGrid() {
       updateStartBtn();
     });
   });
-}
 
-// =============================================
-// Preset Reordering & Management in Settings
-// =============================================
-let activeDraggedRow = null;
-
-function renderSettingsPresets() {
-  settingsPresetList.innerHTML = presets.map((p, idx) => {
-    const valStr = p.mode === "percent" ? `${p.val}%` : `${p.val} MB`;
-    const iconInfo = getPresetIconInfo(p.name, p.icon);
-
-    return `
-    <div class="settings-preset-row" data-index="${idx}" data-id="${p.id}">
-      <span class="spr-handle" title="Drag to reorder">⋮⋮</span>
-      <span class="spr-icon" style="color: ${getIconColor(iconInfo.key)}">
-        ${iconInfo.svg}
-      </span>
-      <span class="spr-name">${p.name}</span>
-      <span class="spr-val">${valStr}</span>
-      <button class="spr-del" data-id="${p.id}" title="Delete">✕</button>
-    </div>`;
-  }).join("");
-
-  // Delete listener
-  settingsPresetList.querySelectorAll(".spr-del").forEach((btn) => {
+  // Delete preset button handling
+  presetGrid.querySelectorAll(".btn-del-preset").forEach((btn) => {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
       const id = parseInt(btn.dataset.id, 10);
       presets = presets.filter((p) => p.id !== id);
-      if (selectedTarget?.presetId === id) {
-        selectedTarget = presets[0]
-          ? {
-              presetId: presets[0].id,
-              mode: presets[0].mode,
-              val: presets[0].val,
-              label: presets[0].mode === "percent" ? `${presets[0].val}%` : `${presets[0].val} MB`,
-            }
-          : null;
-      }
       savePresets();
+
+      if (selectedTarget?.presetId === id) {
+        if (presets[0]) {
+          selectedTarget = {
+            presetId: presets[0].id,
+            mode: presets[0].mode,
+            val: presets[0].val,
+            label: presets[0].mode === "percent" ? `${presets[0].val}%` : `${presets[0].val} MB`,
+          };
+        } else {
+          selectedTarget = null;
+        }
+      }
+
       renderPresetGrid();
-      renderSettingsPresets();
       updateSizeDisplay();
       updateStartBtn();
     });
   });
 }
 
-// Live drag and drop reordering on the preset list
-function initPresetListDrag() {
-  settingsPresetList.addEventListener("mousedown", (e) => {
-    if (e.target.closest("button") || e.target.closest("input")) return;
-    const row = e.target.closest(".settings-preset-row");
-    if (!row) return;
-
-    e.preventDefault();
-    activeDraggedRow = row;
-    activeDraggedRow.classList.add("sorting-active");
-
-    const onMouseMove = (moveEvent) => {
-      if (!activeDraggedRow) return;
-
-      // Crucial: temporarily disable pointer events on the dragged element
-      // so document.elementFromPoint detects the target row underneath the mouse!
-      activeDraggedRow.style.pointerEvents = "none";
-      const elemBelow = document.elementFromPoint(moveEvent.clientX, moveEvent.clientY);
-      activeDraggedRow.style.pointerEvents = "";
-
-      const targetRow = elemBelow?.closest(".settings-preset-row");
-      if (targetRow && targetRow !== activeDraggedRow && targetRow.parentElement === settingsPresetList) {
-        const rect = targetRow.getBoundingClientRect();
-        const midY = rect.top + rect.height / 2;
-        if (moveEvent.clientY < midY) {
-          settingsPresetList.insertBefore(activeDraggedRow, targetRow);
-        } else {
-          settingsPresetList.insertBefore(activeDraggedRow, targetRow.nextSibling);
-        }
-      }
-    };
-
-    const onMouseUp = () => {
-      window.removeEventListener("mousemove", onMouseMove);
-      window.removeEventListener("mouseup", onMouseUp);
-
-      if (!activeDraggedRow) return;
-      activeDraggedRow.classList.remove("sorting-active");
-      activeDraggedRow = null;
-
-      // Extract new order from the DOM
-      const newOrderIds = Array.from(settingsPresetList.querySelectorAll(".settings-preset-row"))
-        .map((r) => parseInt(r.dataset.id, 10));
-
-      const reordered = [];
-      newOrderIds.forEach((id) => {
-        const p = presets.find((item) => item.id === id);
-        if (p) reordered.push(p);
-      });
-
-      presets = reordered;
-      savePresets();
-      renderPresetGrid();
-      renderSettingsPresets();
-      updateSizeDisplay();
-      updateStartBtn();
-    };
-
-    window.addEventListener("mousemove", onMouseMove);
-    window.addEventListener("mouseup", onMouseUp);
-  });
-}
-
-function getIconColor(key) {
-  if (key === "discord")  return "#5865F2";
-  if (key === "whatsapp") return "#25D366";
-  if (key === "telegram") return "#229ED9";
-  if (key === "compact")  return "#4f7cff";
-  return "var(--accent)";
-}
-
-// Add preset
-newModePct.addEventListener("click", () => {
-  newModePct.classList.add("active");
-  newModeMb.classList.remove("active");
-  newPresetVal.max = 99;
-});
-newModeMb.addEventListener("click", () => {
-  newModeMb.classList.add("active");
-  newModePct.classList.remove("active");
-  newPresetVal.max = 9999;
-});
-
-btnAddPreset.addEventListener("click", () => {
-  const name = newPresetName.value.trim();
-  const val  = parseInt(newPresetVal.value, 10);
-  const mode = newModePct.classList.contains("active") ? "percent" : "fixed";
-  if (!name || isNaN(val) || val < 1) return;
-
-  const iconInfo = getPresetIconInfo(name, null);
-  presets.push({ id: Date.now(), name, mode, val, icon: iconInfo.key });
-  newPresetName.value = "";
-  savePresets();
-  renderPresetGrid();
-  renderSettingsPresets();
-});
-
+// Encoder dropdown
 const encoderTrigger = document.getElementById("encoder-trigger");
 const encoderOptions = document.getElementById("encoder-options");
 const encoderSelectedLabel = document.getElementById("encoder-selected-label");
@@ -398,6 +460,12 @@ if (encoderTrigger && encoderOptions) {
     }
   });
 }
+
+// Update FFmpeg Core button
+btnUpdateFfmpeg?.addEventListener("click", () => {
+  closeOverlay(overlaySets);
+  checkFFmpegSetup(true);
+});
 
 // Reset All Settings button
 btnResetAll.addEventListener("click", () => {
@@ -433,11 +501,9 @@ btnResetAll.addEventListener("click", () => {
   };
 
   renderPresetGrid();
-  renderSettingsPresets();
   updateSizeDisplay();
   updateStartBtn();
 
-  // Feedback animation on button
   btnResetAll.textContent = "✓ Settings Reset";
   btnResetAll.style.color = "var(--green)";
   btnResetAll.style.borderColor = "var(--green)";
@@ -472,7 +538,6 @@ function updateSizeDisplay() {
     return;
   }
 
-  // Done files check
   const doneFiles = filesQueue.filter((f) => f.status === "done" && f.finalSizeMb != null);
   if (doneFiles.length > 0) {
     const actualMb = doneFiles.reduce((s, f) => s + f.finalSizeMb, 0);
@@ -522,16 +587,23 @@ sliderUseBtn.addEventListener("click", () => {
 // Output Folder
 // =============================================
 function updateOutputFolderUI(folder) {
+  const iconWrap = document.getElementById("out-folder-icon");
   if (folder) {
-    const parts = folder.replace(/\\/g, "/").split("/");
-    const leaf = parts[parts.length - 1] || "foshorde-output";
-    outFolderLabel.textContent = leaf;
-    outFolderLabel.title = folder;
-    btnOutFolder?.classList.add("custom-active");
-  } else {
-    outFolderLabel.textContent = "foshorde-output";
-    outFolderLabel.title = "Default: foshorde-output in project directory";
+    btnOutFolder?.classList.add("custom-set");
     btnOutFolder?.classList.remove("custom-active");
+    if (iconWrap) {
+      iconWrap.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><polyline points="20 6 9 17 4 12"/></svg>`;
+    }
+    outFolderLabel.textContent = "Output Set";
+    btnOutFolder.title = folder;
+  } else {
+    btnOutFolder?.classList.remove("custom-set");
+    btnOutFolder?.classList.remove("custom-active");
+    if (iconWrap) {
+      iconWrap.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>`;
+    }
+    outFolderLabel.textContent = "foshorde-output";
+    btnOutFolder.title = "Default: foshorde-output in project directory";
   }
 }
 
@@ -578,10 +650,12 @@ btnOpenOutFolder?.addEventListener("click", async (e) => {
 });
 
 // =============================================
-// File Drop & Selection
+// File Drop & Selection Logic
 // =============================================
 async function addFile(filePath) {
+  if (!filePath || typeof filePath !== "string") return;
   if (filesQueue.some((f) => f.path === filePath)) return;
+
   try {
     const meta = await tauriInvoke("probe_video", { filePath });
     filesQueue.push({
@@ -593,13 +667,30 @@ async function addFile(filePath) {
       outputPath: null,
       finalSizeMb: null,
     });
-    refreshUI();
   } catch (err) {
-    console.error("Probe error:", filePath, err);
+    console.warn("Probe warning, adding with default metadata:", err);
+    const filename = filePath.replace(/\\/g, "/").split("/").pop() || "video";
+    filesQueue.push({
+      path: filePath,
+      filename,
+      size_mb: 10.0,
+      duration_secs: 0.0,
+      audio_bitrate_kbps: 128,
+      is_hdr: false,
+      is_10bit: false,
+      status: "pending",
+      progress: 0,
+      speed: "",
+      eta: "",
+      outputPath: null,
+      finalSizeMb: null,
+    });
   }
+  refreshUI();
 }
 
-dropRow.addEventListener("click", async () => {
+// Click anywhere on drop view (or browse link) to open file dialog
+dropView?.addEventListener("click", async () => {
   if (isProcessing) return;
   try {
     const paths = await tauriInvoke("select_video_files");
@@ -609,18 +700,48 @@ dropRow.addEventListener("click", async () => {
   } catch {}
 });
 
-window.addEventListener("dragover",  (e) => { e.preventDefault(); dropRow.classList.add("dragover"); });
-window.addEventListener("dragleave", (e) => { if (e.clientX <= 0 || e.clientY <= 0) dropRow.classList.remove("dragover"); });
-window.addEventListener("drop",      (e) => { e.preventDefault(); dropRow.classList.remove("dragover"); });
+// Add button in compact drop bar
+dropBarChange?.addEventListener("click", async (e) => {
+  e.stopPropagation();
+  if (isProcessing) return;
+  try {
+    const paths = await tauriInvoke("select_video_files");
+    if (paths?.length) {
+      for (const p of paths) await addFile(p);
+    }
+  } catch {}
+});
+
+// Drag and drop event listeners
+window.addEventListener("dragover", (e) => {
+  e.preventDefault();
+  dropCard?.classList.add("dragover");
+});
+window.addEventListener("dragleave", (e) => {
+  if (e.clientX <= 0 || e.clientY <= 0) {
+    dropCard?.classList.remove("dragover");
+  }
+});
+window.addEventListener("drop", async (e) => {
+  e.preventDefault();
+  dropCard?.classList.remove("dragover");
+  if (e.dataTransfer?.files?.length) {
+    for (const file of e.dataTransfer.files) {
+      if (file.path) {
+        await addFile(file.path);
+      }
+    }
+  }
+});
 
 // =============================================
 // Overlays Toggle
 // =============================================
 function openOverlay(el) {
-  el.style.display = "flex";
+  if (el) el.style.display = "flex";
 }
 function closeOverlay(el) {
-  el.style.display = "none";
+  if (el) el.style.display = "none";
 }
 
 document.querySelectorAll(".btn-close-overlay").forEach((btn) => {
@@ -641,7 +762,6 @@ document.getElementById("btn-toggle-settings").addEventListener("click", () => {
   if (overlaySets.style.display === "flex") {
     closeOverlay(overlaySets);
   } else {
-    renderSettingsPresets();
     initSystem();
     openOverlay(overlaySets);
   }
@@ -661,14 +781,14 @@ function refreshUI() {
   const count = filesQueue.length;
 
   if (count === 0) {
-    dropEmpty.style.display  = "flex";
-    dropLoaded.style.display = "none";
+    if (dropView)   dropView.style.display = "flex";
+    if (editorView) editorView.style.display = "none";
     queueBadge.style.display = "none";
   } else {
-    dropEmpty.style.display  = "none";
-    dropLoaded.style.display = "flex";
-    fileCountBadge.textContent = `${count} file${count > 1 ? "s" : ""}`;
+    if (dropView)   dropView.style.display = "none";
+    if (editorView) editorView.style.display = "flex";
 
+    fileCountBadge.textContent = `${count} file${count > 1 ? "s" : ""}`;
     if (count === 1) {
       fileNameEl.textContent   = filesQueue[0].filename;
       fileOrigSize.textContent = `${filesQueue[0].size_mb.toFixed(1)} MB`;
@@ -682,6 +802,7 @@ function refreshUI() {
     queueBadge.style.display = "block";
   }
 
+  renderPresetGrid();
   updateSizeDisplay();
   updateStartBtn();
   renderQueue();
@@ -818,7 +939,7 @@ btnStart.addEventListener("click", async () => {
 });
 
 // =============================================
-// Live Progress Listeners
+// Live Progress Listeners & Native Drop Hooks
 // =============================================
 function setupEvents() {
   const listen = window.__TAURI__?.event?.listen;
@@ -827,10 +948,51 @@ function setupEvents() {
     return;
   }
 
+  // 1. App-level custom event emitted from Rust on_window_event
   listen("files-dropped", async (e) => {
-    for (const p of (e.payload || [])) await addFile(p);
+    const paths = Array.isArray(e.payload) ? e.payload : (e.payload?.paths || []);
+    for (const p of paths) await addFile(p);
   });
 
+  // 2. Tauri native window drag drop event
+  listen("tauri://drag-drop", async (e) => {
+    dropCard?.classList.remove("dragover");
+    const paths = e.payload?.paths || [];
+    for (const p of paths) await addFile(p);
+  });
+  listen("tauri://drag-over", () => {
+    dropCard?.classList.add("dragover");
+  });
+  listen("tauri://drag-leave", () => {
+    dropCard?.classList.remove("dragover");
+  });
+
+  // 3. WebviewWindow onDragDropEvent hook
+  try {
+    const win = window.__TAURI__?.window?.getCurrentWindow?.() || window.__TAURI__?.webviewWindow?.getCurrentWebviewWindow?.();
+    if (win?.onDragDropEvent) {
+      win.onDragDropEvent(async (e) => {
+        if (e.payload?.type === "drop") {
+          dropCard?.classList.remove("dragover");
+          for (const p of (e.payload.paths || [])) await addFile(p);
+        } else if (e.payload?.type === "enter" || e.payload?.type === "over") {
+          dropCard?.classList.add("dragover");
+        } else if (e.payload?.type === "leave") {
+          dropCard?.classList.remove("dragover");
+        }
+      });
+    }
+    if (win?.listen) {
+      win.listen("files-dropped", async (e) => {
+        const paths = Array.isArray(e.payload) ? e.payload : (e.payload?.paths || []);
+        for (const p of paths) await addFile(p);
+      });
+    }
+  } catch (err) {
+    console.warn("DragDrop hook notice:", err);
+  }
+
+  // Compression progress
   listen("compression-progress", (e) => {
     const p   = e.payload;
     const idx = filesQueue.findIndex((f) => f.path === p.path);
@@ -851,16 +1013,16 @@ function setupEvents() {
 // =============================================
 // FFmpeg Auto-Download on First Setup
 // =============================================
-const overlayDl      = document.getElementById("overlay-ffmpeg-download");
-const dlFill         = document.getElementById("dl-fill");
-const dlStatusText   = document.getElementById("dl-status-text");
-const dlPctText      = document.getElementById("dl-pct-text");
-const dlMbText       = document.getElementById("dl-mb-text");
-const dlSpeedText    = document.getElementById("dl-speed-text");
+const overlayDl       = document.getElementById("overlay-ffmpeg-download");
+const dlFill          = document.getElementById("dl-fill");
+const dlStatusText    = document.getElementById("dl-status-text");
+const dlPctText       = document.getElementById("dl-pct-text");
+const dlMbText        = document.getElementById("dl-mb-text");
+const dlSpeedText     = document.getElementById("dl-speed-text");
 const btnCloseDlModal = document.getElementById("btn-close-dl-modal");
-const dlActions      = document.getElementById("dl-actions");
-const btnDlRetry     = document.getElementById("btn-dl-retry");
-const btnDlOffline   = document.getElementById("btn-dl-offline");
+const dlActions       = document.getElementById("dl-actions");
+const btnDlRetry      = document.getElementById("btn-dl-retry");
+const btnDlOffline    = document.getElementById("btn-dl-offline");
 
 btnCloseDlModal?.addEventListener("click", () => {
   if (overlayDl) overlayDl.style.display = "none";
@@ -873,7 +1035,7 @@ btnDlOffline?.addEventListener("click", () => {
 btnDlRetry?.addEventListener("click", () => {
   if (dlActions) dlActions.style.display = "none";
   if (dlStatusText) {
-    dlStatusText.textContent = "Connecting to official server...";
+    dlStatusText.textContent = "Connecting to server...";
     dlStatusText.style.color = "";
   }
   if (dlFill) dlFill.style.width = "0%";
@@ -935,9 +1097,8 @@ async function checkFFmpegSetup(force = false) {
 }
 
 // =============================================
-// Initialization & Global Event Settings
+// Initialization
 // =============================================
-// Disable native browser context menu on right click
 window.addEventListener("contextmenu", (e) => {
   e.preventDefault();
 });
@@ -955,9 +1116,9 @@ window.addEventListener("DOMContentLoaded", () => {
     };
   }
   renderPresetGrid();
-  initPresetListDrag();
   updateSizeDisplay();
   setupEvents();
   updateStartBtn();
+  refreshUI();
   checkFFmpegSetup();
 });
