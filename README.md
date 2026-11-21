@@ -1,7 +1,7 @@
-# Foshorde (فشرده)
-
 <p align="center">
-  <strong>Minimal. Fast. Efficient.</strong><br>
+  <img src="icons/png-dark/foshorde-dark-128x128.png" alt="Foshorde Logo" width="96" height="96"><br>
+  <strong>Foshorde (فشرده)</strong><br>
+  <em>Minimal. Fast. Efficient.</em><br>
   A modern, high-performance Windows video compressor powered by Tauri v2, Rust, and FFmpeg with full hardware acceleration.
 </p>
 
@@ -82,16 +82,16 @@
 - [Node.js](https://nodejs.org/) (v18+)
 
 ### Build Commands
-To compile the standalone GUI executable:
-```bat
-build.bat
+To compile the standalone GUI executable directly:
+```bash
+cargo build --manifest-path foshorde-gui/src-tauri/Cargo.toml --release
 ```
-Or build directly through Tauri CLI:
+Or build through the Tauri CLI:
 ```bash
 cd foshorde-gui
 npx tauri build --no-bundle
 ```
-The optimized executable will be located at `foshorde-gui/src-tauri/target/release/foshorde-gui.exe` and copied to the root as `Foshorde.exe`.
+The optimized executable will be located at `foshorde-gui/src-tauri/target/release/foshorde-gui.exe` (~5.2 MB standalone).
 
 ---
 
@@ -99,15 +99,14 @@ The optimized executable will be located at `foshorde-gui/src-tauri/target/relea
 
 ```
 Foshorde/
-├── Foshorde.exe            # Standalone GUI application (~4.7 MB)
-├── build.bat               # 1-click build script
-├── version.txt             # Version identifier (1.4.0)
-├── bin/                    # FFmpeg & FFprobe binaries
+├── Foshorde.exe            # Standalone GUI application
+├── icons/                  # High-resolution brand icons (ICO, ICNS, PNG, SVG)
+├── bin/                    # Auto-downloaded FFmpeg & FFprobe binaries
 │   ├── ffmpeg.exe
 │   └── ffprobe.exe
 ├── foshorde-gui/           # Tauri v2 + Rust frontend/backend source
-│   ├── src/                # HTML5, CSS3, JavaScript UI
-│   └── src-tauri/          # Rust backend, window handlers & FFmpeg manager
+│   ├── src/                # Modern dark UI (HTML5, CSS3, JavaScript)
+│   └── src-tauri/          # Rust core, FFmpeg process manager & PATH integration
 └── foshorde-output/        # Output directory for compressed videos
 ```
 
