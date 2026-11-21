@@ -40,8 +40,16 @@ const SUPPORTED_VIDEO_EXTS = new Set([
 ]);
 
 const toastContainer = document.getElementById("toast-container");
-function showToast(msg, type = "danger", duration = 3000) {
+function showToast(msg, type = "danger", duration = 2800) {
   if (!toastContainer) return;
+  // Deduplicate: prevent stacking identical messages (e.g. multi-file drops)
+  if (Array.from(toastContainer.children).some((c) => c.textContent.includes(msg))) {
+    return;
+  }
+  while (toastContainer.children.length >= 2) {
+    toastContainer.removeChild(toastContainer.firstChild);
+  }
+
   const t = document.createElement("div");
   t.className = `toast ${type}`;
   const icon = type === "success" ? "✓" : "⚠";
@@ -166,6 +174,7 @@ document.getElementById("titlebar").addEventListener("mousedown", (e) => {
 
 // =============================================
 // Movable Floating Dialogs (Settings, Queue, Add Preset)
+// Clamped inside window boundaries so they never get cut off!
 // =============================================
 function makeDraggable(dialogEl, handleEl) {
   let isDragging = false;
@@ -188,13 +197,12 @@ function makeDraggable(dialogEl, handleEl) {
     const dx = e.clientX - startX;
     const dy = e.clientY - startY;
 
-    // Generous dragging margins so dialogs can move freely towards/beyond borders
-    const minLeft = -dialogEl.offsetWidth + 60;
-    const maxLeft = window.innerWidth - 60;
-    const minTop  = 32;
-    const maxTop  = window.innerHeight - 36;
-    const newLeft = Math.max(minLeft, Math.min(maxLeft, initLeft + dx));
-    const newTop  = Math.max(minTop, Math.min(maxTop, initTop + dy));
+    // Strict inside-window boundaries so dialog is never cut off
+    const pad = 6;
+    const maxLeft = Math.max(pad, window.innerWidth - dialogEl.offsetWidth - pad);
+    const maxTop  = Math.max(36, window.innerHeight - dialogEl.offsetHeight - pad);
+    const newLeft = Math.max(pad, Math.min(maxLeft, initLeft + dx));
+    const newTop  = Math.max(36, Math.min(maxTop, initTop + dy));
 
     dialogEl.style.left = `${newLeft}px`;
     dialogEl.style.top  = `${newTop}px`;
@@ -282,7 +290,7 @@ btnConfirmAddPreset?.addEventListener("click", () => {
   const name = addPresetName?.value?.trim() || "";
   if (!name) {
     if (addPresetError) {
-      addPresetError.textContent = "لطفاً یک نام برای پریست وارد کنید";
+      addPresetError.textContent = "Please enter a preset name";
       addPresetError.style.display = "block";
     }
     addPresetName?.classList.add("has-error");
@@ -290,11 +298,11 @@ btnConfirmAddPreset?.addEventListener("click", () => {
     return;
   }
 
-  // Prevent duplicate names (Point 11)
+  // Prevent duplicate names (English message)
   const isDuplicate = presets.some((p) => p.name.trim().toLowerCase() === name.toLowerCase());
   if (isDuplicate) {
     if (addPresetError) {
-      addPresetError.textContent = "این نام قبلاً برای یک پریست استفاده شده است!";
+      addPresetError.textContent = "Preset name already exists!";
       addPresetError.style.display = "block";
     }
     addPresetName?.classList.add("has-error");
@@ -330,33 +338,42 @@ btnConfirmAddPreset?.addEventListener("click", () => {
   renderPresetGrid();
   updateSizeDisplay();
   updateStartBtn();
-  showToast(`پریست "${name}" افزوده شد ✓`, "success", 2000);
+  showToast(`Preset "${name}" added ✓`, "success", 2000);
 });
 
-// Overscroll Edge Glow (Points 13 & 14)
+// Overscroll Edge Glow (Points 13 & 14 - Fixed to fire ONLY when content overflows)
 let glowTimeout = null;
 function triggerGlow(el) {
-  if (!el) return;
+  if (!el || !panelLeft) return;
+  const hasScroll = panelLeft.scrollHeight > panelLeft.clientHeight + 4;
+  if (!hasScroll) return;
+
   el.classList.add("active");
   clearTimeout(glowTimeout);
   glowTimeout = setTimeout(() => {
     el.classList.remove("active");
-  }, 450);
+  }, 400);
 }
 
 if (panelLeft) {
   panelLeft.addEventListener("wheel", (e) => {
+    const hasScroll = panelLeft.scrollHeight > panelLeft.clientHeight + 4;
+    if (!hasScroll) return;
+
     if (e.deltaY < 0 && panelLeft.scrollTop <= 0) {
       triggerGlow(glowTop);
-    } else if (e.deltaY > 0 && panelLeft.scrollTop + panelLeft.clientHeight >= panelLeft.scrollHeight - 3) {
+    } else if (e.deltaY > 0 && panelLeft.scrollTop + panelLeft.clientHeight >= panelLeft.scrollHeight - 2) {
       triggerGlow(glowBottom);
     }
   }, { passive: true });
 
   panelLeft.addEventListener("scroll", () => {
+    const hasScroll = panelLeft.scrollHeight > panelLeft.clientHeight + 4;
+    if (!hasScroll) return;
+
     if (panelLeft.scrollTop <= 0) {
       triggerGlow(glowTop);
-    } else if (panelLeft.scrollTop + panelLeft.clientHeight >= panelLeft.scrollHeight - 3) {
+    } else if (panelLeft.scrollTop + panelLeft.clientHeight >= panelLeft.scrollHeight - 2) {
       triggerGlow(glowBottom);
     }
   }, { passive: true });
@@ -377,7 +394,7 @@ async function initSystem() {
 }
 
 // =============================================
-// Preset Grid Rendering + Mouse Drag Reorder
+// Preset Grid Rendering + Mouse Drag Reorder (Point 5: Swap Only + Spring Animation)
 // =============================================
 let activeDragCard = null;
 let dragStartX = 0;
@@ -413,21 +430,18 @@ function setupPresetCardMouseDrag(card) {
         const elemUnder = document.elementFromPoint(moveEvt.clientX, moveEvt.clientY);
         const targetCard = elemUnder?.closest(".preset-card");
 
-        if (targetCard && targetCard !== activeDragCard && targetCard.parentNode === presetGrid) {
-          const cards = Array.from(presetGrid.children);
-          const activeIdx = cards.indexOf(activeDragCard);
-          const targetIdx = cards.indexOf(targetCard);
+        // Clear previous drag-target highlight
+        presetGrid.querySelectorAll(".preset-card").forEach((c) => {
+          if (c !== targetCard) c.classList.remove("drag-target");
+        });
 
-          if (activeIdx < targetIdx) {
-            presetGrid.insertBefore(activeDragCard, targetCard.nextSibling);
-          } else {
-            presetGrid.insertBefore(activeDragCard, targetCard);
-          }
+        if (targetCard && targetCard !== activeDragCard && targetCard.parentNode === presetGrid) {
+          targetCard.classList.add("drag-target");
         }
       }
     };
 
-    const onMouseUp = () => {
+    const onMouseUp = (upEvt) => {
       window.removeEventListener("mousemove", onMouseMove);
       window.removeEventListener("mouseup", onMouseUp);
 
@@ -436,24 +450,93 @@ function setupPresetCardMouseDrag(card) {
         document.body.style.userSelect = "";
         document.body.style.cursor = "";
 
-        // Persist new order
-        const newOrderIds = Array.from(presetGrid.querySelectorAll(".preset-card"))
-          .map((c) => parseInt(c.dataset.id, 10));
-        const reordered = [];
-        newOrderIds.forEach((id) => {
-          const p = presets.find((item) => item.id === id);
-          if (p) reordered.push(p);
-        });
+        // Check if there is a target card to swap with
+        const elemUnder = document.elementFromPoint(upEvt.clientX, upEvt.clientY);
+        let targetCard = elemUnder?.closest(".preset-card");
+        if (!targetCard || targetCard === activeDragCard || targetCard.parentNode !== presetGrid) {
+          targetCard = presetGrid.querySelector(".preset-card.drag-target");
+        }
 
-        if (reordered.length > 0) {
-          presets = reordered;
-          savePresets();
+        // Remove highlights
+        presetGrid.querySelectorAll(".preset-card").forEach((c) => c.classList.remove("drag-target"));
+
+        if (targetCard && targetCard !== activeDragCard && targetCard.parentNode === presetGrid) {
+          const idA = parseInt(activeDragCard.dataset.id, 10);
+          const idB = parseInt(targetCard.dataset.id, 10);
+
+          const rectA = activeDragCard.getBoundingClientRect();
+          const rectB = targetCard.getBoundingClientRect();
+
+          const idxA = presets.findIndex((p) => p.id === idA);
+          const idxB = presets.findIndex((p) => p.id === idB);
+
+          if (idxA !== -1 && idxB !== -1) {
+            // Swap in presets array (other presets untouched)
+            const tmp = presets[idxA];
+            presets[idxA] = presets[idxB];
+            presets[idxB] = tmp;
+            savePresets();
+
+            // Re-render
+            renderPresetGrid();
+
+            // FLIP Animation between swapped cards
+            const newCardA = presetGrid.querySelector(`.preset-card[data-id="${idA}"]`);
+            const newCardB = presetGrid.querySelector(`.preset-card[data-id="${idB}"]`);
+
+            if (newCardA && newCardB) {
+              const newRectA = newCardA.getBoundingClientRect();
+              const newRectB = newCardB.getBoundingClientRect();
+
+              const dxA = rectA.left - newRectA.left;
+              const dyA = rectA.top - newRectA.top;
+              const dxB = rectB.left - newRectB.left;
+              const dyB = rectB.top - newRectB.top;
+
+              // Invert
+              newCardA.style.transition = "none";
+              newCardA.style.transform = `translate(${dxA}px, ${dyA}px) scale(1.05)`;
+              newCardA.style.zIndex = "25";
+
+              newCardB.style.transition = "none";
+              newCardB.style.transform = `translate(${dxB}px, ${dyB}px) scale(0.95)`;
+              newCardB.style.zIndex = "20";
+
+              // Force reflow
+              void newCardA.offsetWidth;
+
+              // Play animation to final positions with spring bounce
+              newCardA.style.transition = "transform 0.42s cubic-bezier(0.34, 1.45, 0.64, 1), box-shadow 0.42s ease";
+              newCardB.style.transition = "transform 0.42s cubic-bezier(0.34, 1.45, 0.64, 1), box-shadow 0.42s ease";
+              newCardA.style.transform = "translate(0, 0) scale(1)";
+              newCardB.style.transform = "translate(0, 0) scale(1)";
+              newCardA.classList.add("just-swapped");
+              newCardB.classList.add("just-swapped");
+
+              setTimeout(() => {
+                if (newCardA) {
+                  newCardA.style.transition = "";
+                  newCardA.style.transform = "";
+                  newCardA.style.zIndex = "";
+                  newCardA.classList.remove("just-swapped");
+                }
+                if (newCardB) {
+                  newCardB.style.transition = "";
+                  newCardB.style.transform = "";
+                  newCardB.style.zIndex = "";
+                  newCardB.classList.remove("just-swapped");
+                }
+              }, 450);
+            }
+          }
         }
 
         justFinishedDrag = true;
         setTimeout(() => {
           justFinishedDrag = false;
-        }, 80);
+        }, 100);
+      } else {
+        presetGrid.querySelectorAll(".preset-card").forEach((c) => c.classList.remove("drag-target"));
       }
 
       activeDragCard = null;
@@ -776,7 +859,7 @@ async function addFile(filePath) {
   // Validate video format (Point 1 & 3)
   const ext = filePath.split(".").pop()?.toLowerCase();
   if (!ext || !SUPPORTED_VIDEO_EXTS.has(ext)) {
-    showToast("فقط فایل‌های ویدیویی پشتیبانی می‌شوند! (Only video files supported)", "danger");
+    showToast("Only video files are supported!", "danger");
     return;
   }
 
@@ -1082,7 +1165,7 @@ btnStart.addEventListener("click", async () => {
   const anyDone = filesQueue.some((f) => f.status === "done");
   const allFinished = filesQueue.length > 0 && filesQueue.every((f) => f.status === "done" || f.status === "cancelled");
   if (allFinished && anyDone) {
-    showToast("فشرده‌سازی با موفقیت انجام شد ✓", "success", 2500);
+    showToast("Compression completed successfully ✓", "success", 2500);
     setTimeout(() => {
       if (!isProcessing) {
         filesQueue = [];
