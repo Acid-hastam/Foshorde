@@ -42,6 +42,16 @@ pub struct ProgressPayload {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct DownloadProgressPayload {
+    pub stage: String,
+    pub percent: f64,
+    pub downloaded_mb: f64,
+    pub total_mb: f64,
+    pub speed: String,
+    pub message: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct CompressionResult {
     pub output_path: String,
     pub output_size_mb: f64,
@@ -131,6 +141,29 @@ fn ensure_bin_in_user_path() {
     }
 }
 
+fn get_default_output_dir() -> PathBuf {
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            return parent.join("foshorde-output");
+        }
+    }
+    PathBuf::from("foshorde-output")
+}
+
+fn resolve_output_dir(custom_path: &str) -> PathBuf {
+    if custom_path.trim().is_empty() {
+        get_default_output_dir()
+    } else {
+        let p = PathBuf::from(custom_path.trim());
+        let name_lower = p.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
+        if name_lower == "foshorde-output" {
+            p
+        } else {
+            p.join("foshorde-output")
+        }
+    }
+}
+
 fn get_detected_encoder() -> EncoderInfo {
     let (ffmpeg, _) = get_bin_path("ffmpeg");
 
@@ -213,22 +246,38 @@ mod commands {
     pub fn start_drag(window: tauri::Window) { let _ = window.start_dragging(); }
 
     #[tauri::command]
-    pub fn select_video_files(app: tauri::AppHandle) -> Result<Vec<String>, String> {
-        use tauri_plugin_dialog::DialogExt;
-        let files = app.dialog().file()
-            .add_filter("Videos", &["mp4","mkv","mov","avi","webm","flv","ts","m4v","wmv"])
-            .blocking_pick_files();
-        Ok(match files {
-            Some(list) => list.into_iter().map(|p| p.to_string()).collect(),
-            None => Vec::new(),
-        })
+    pub fn is_ffmpeg_ready() -> bool {
+        let (ffmpeg, _) = get_bin_path("ffmpeg");
+        let (ffprobe, _) = get_bin_path("ffprobe");
+        ffmpeg.is_file() && ffprobe.is_file()
     }
 
     #[tauri::command]
-    pub fn select_output_folder(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    pub async fn select_video_files(app: tauri::AppHandle) -> Result<Vec<String>, String> {
         use tauri_plugin_dialog::DialogExt;
-        let folder = app.dialog().file().blocking_pick_folder();
-        Ok(folder.map(|p| p.to_string()))
+        let (tx, rx) = std::sync::mpsc::channel();
+        app.dialog().file()
+            .add_filter("Videos", &["mp4","mkv","mov","avi","webm","flv","ts","m4v","wmv"])
+            .pick_files(move |files| {
+                let _ = tx.send(files);
+            });
+        match rx.recv() {
+            Ok(Some(list)) => Ok(list.into_iter().map(|p| p.to_string()).collect()),
+            _ => Ok(Vec::new()),
+        }
+    }
+
+    #[tauri::command]
+    pub async fn select_output_folder(app: tauri::AppHandle) -> Result<Option<String>, String> {
+        use tauri_plugin_dialog::DialogExt;
+        let (tx, rx) = std::sync::mpsc::channel();
+        app.dialog().file().pick_folder(move |folder| {
+            let _ = tx.send(folder);
+        });
+        match rx.recv() {
+            Ok(Some(folder)) => Ok(Some(folder.to_string())),
+            _ => Ok(None),
+        }
     }
 
     #[tauri::command]
@@ -256,32 +305,205 @@ mod commands {
     }
 
     #[tauri::command]
-    pub fn open_folder(folder_path: String) {
-        #[cfg(target_os = "windows")] {
-            use std::os::windows::process::CommandExt;
-            let target = if !folder_path.is_empty() && Path::new(&folder_path).exists() {
-                PathBuf::from(&folder_path)
-            } else {
-                if let Ok(exe) = std::env::current_exe() {
-                    exe.parent().unwrap_or_else(|| Path::new(".")).join("feshorde-shod")
-                } else {
-                    PathBuf::from("feshorde-shod")
-                }
-            };
-            let _ = std::fs::create_dir_all(&target);
-            let _ = Command::new("explorer").arg(&target).creation_flags(0x08000000).spawn();
+    pub fn open_folder(folder_path: String) -> Result<(), String> {
+        let target = resolve_output_dir(&folder_path);
+        let _ = std::fs::create_dir_all(&target);
+        let target_str = target.to_string_lossy().to_string();
+
+        if let Err(_) = tauri_plugin_opener::open_path(&target_str, None::<&str>) {
+            #[cfg(target_os = "windows")]
+            {
+                let _ = Command::new("explorer").arg(&target_str).spawn();
+            }
         }
+        Ok(())
     }
 
     #[tauri::command]
-    pub fn show_in_folder(file_path: String) {
-        #[cfg(target_os = "windows")] {
-            use std::os::windows::process::CommandExt;
-            let p = Path::new(&file_path);
-            if p.exists() {
-                let _ = Command::new("explorer").arg(format!("/select,\"{}\"", file_path)).creation_flags(0x08000000).spawn();
+    pub fn show_in_folder(file_path: String) -> Result<(), String> {
+        let p = Path::new(&file_path);
+        if p.exists() {
+            if let Err(_) = tauri_plugin_opener::reveal_item_in_dir(p) {
+                #[cfg(target_os = "windows")]
+                {
+                    let _ = Command::new("explorer").arg(format!("/select,\"{}\"", file_path)).spawn();
+                }
             }
         }
+        Ok(())
+    }
+
+    #[tauri::command]
+    pub async fn download_ffmpeg(app: tauri::AppHandle) -> Result<(), String> {
+        let bin_dir = if let Ok(exe) = std::env::current_exe() {
+            exe.parent().unwrap_or_else(|| Path::new(".")).join("bin")
+        } else {
+            PathBuf::from("bin")
+        };
+        std::fs::create_dir_all(&bin_dir).map_err(|e| e.to_string())?;
+
+        let temp_zip = std::env::temp_dir().join("foshorde-ffmpeg.zip");
+        let temp_extract = std::env::temp_dir().join("foshorde-ffmpeg-extract");
+        let _ = std::fs::remove_file(&temp_zip);
+        let _ = std::fs::remove_dir_all(&temp_extract);
+
+        let ps_script = format!(
+            r#"$urls = @('https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip', 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip');
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12;
+$ok = $false;
+foreach ($u in $urls) {{
+    try {{
+        $req = [System.Net.HttpWebRequest]::Create($u);
+        $req.Timeout = 15000;
+        $req.UserAgent = 'Foshorde/1.4';
+        $resp = $req.GetResponse();
+        $total = $resp.ContentLength;
+        $st = $resp.GetResponseStream();
+        $fs = [System.IO.File]::Create('{zip_path}');
+        $buf = New-Object byte[] 65536;
+        $curr = 0;
+        $sw = [System.Diagnostics.Stopwatch]::StartNew();
+        $lastEmit = 0;
+        while (($n = $st.Read($buf, 0, $buf.Length)) -gt 0) {{
+            $fs.Write($buf, 0, $n);
+            $curr += $n;
+            if ($sw.ElapsedMilliseconds - $lastEmit -ge 150) {{
+                $lastEmit = $sw.ElapsedMilliseconds;
+                $pct = if ($total -gt 0) {{ [math]::Round(($curr / $total) * 100, 1) }} else {{ 0.0 }};
+                $sec = [math]::Max(0.1, $sw.Elapsed.TotalSeconds);
+                $speed = [math]::Round(($curr / 1MB) / $sec, 1);
+                $downMb = [math]::Round($curr / 1MB, 1);
+                $totMb = [math]::Round($total / 1MB, 1);
+                [Console]::WriteLine("PROGRESS:$pct:$downMb:$totMb:$speed MB/s");
+            }}
+        }}
+        $fs.Close(); $st.Close(); $resp.Close();
+        $ok = $true;
+        break;
+    }} catch {{}}
+}}
+if ($ok) {{ exit 0 }} else {{ exit 1 }}"#,
+            zip_path = temp_zip.to_string_lossy().replace('\'', "''")
+        );
+
+        let _ = app.emit("ffmpeg-download-progress", DownloadProgressPayload {
+            stage: "connecting".to_string(),
+            percent: 0.0,
+            downloaded_mb: 0.0,
+            total_mb: 90.0,
+            speed: "".to_string(),
+            message: "Connecting to official FFmpeg servers...".to_string(),
+        });
+
+        let mut cmd = Command::new("powershell");
+        cmd.args(["-NoProfile", "-NonInteractive", "-Command", &ps_script]);
+        cmd.stdout(Stdio::piped()).stderr(Stdio::null());
+        #[cfg(target_os = "windows")] {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x08000000);
+        }
+
+        let mut child = cmd.spawn().map_err(|e| format!("PowerShell spawn error: {}", e))?;
+        let stdout = child.stdout.take().ok_or("No PowerShell stdout")?;
+        let reader = BufReader::new(stdout);
+
+        for line in reader.lines() {
+            if let Ok(l) = line {
+                let t = l.trim();
+                if t.starts_with("PROGRESS:") {
+                    let parts: Vec<&str> = t.split(':').collect();
+                    if parts.len() >= 5 {
+                        let pct = parts[1].parse::<f64>().unwrap_or(0.0);
+                        let down_mb = parts[2].parse::<f64>().unwrap_or(0.0);
+                        let tot_mb = parts[3].parse::<f64>().unwrap_or(90.0);
+                        let speed = parts[4].to_string();
+                        let _ = app.emit("ffmpeg-download-progress", DownloadProgressPayload {
+                            stage: "downloading".to_string(),
+                            percent: pct,
+                            downloaded_mb: down_mb,
+                            total_mb: tot_mb,
+                            speed,
+                            message: format!("Downloading FFmpeg core ({} / {} MB)...", down_mb, tot_mb),
+                        });
+                    }
+                }
+            }
+        }
+
+        let status = child.wait().map_err(|e| e.to_string())?;
+        if !status.success() || !temp_zip.exists() {
+            let _ = app.emit("ffmpeg-download-progress", DownloadProgressPayload {
+                stage: "error".to_string(),
+                percent: 0.0,
+                downloaded_mb: 0.0,
+                total_mb: 0.0,
+                speed: "".to_string(),
+                message: "Failed to download FFmpeg. Please check your internet connection.".to_string(),
+            });
+            return Err("Download failed".to_string());
+        }
+
+        let _ = app.emit("ffmpeg-download-progress", DownloadProgressPayload {
+            stage: "extracting".to_string(),
+            percent: 99.0,
+            downloaded_mb: 90.0,
+            total_mb: 90.0,
+            speed: "".to_string(),
+            message: "Extracting binaries (ffmpeg.exe, ffprobe.exe)...".to_string(),
+        });
+
+        std::fs::create_dir_all(&temp_extract).map_err(|e| e.to_string())?;
+        let extract_script = format!(
+            r#"$z = '{}'; $d = '{}'; Expand-Archive -LiteralPath $z -DestinationPath $d -Force"#,
+            temp_zip.to_string_lossy().replace('\'', "''"),
+            temp_extract.to_string_lossy().replace('\'', "''")
+        );
+        let mut ext_cmd = Command::new("powershell");
+        ext_cmd.args(["-NoProfile", "-NonInteractive", "-Command", &extract_script]);
+        #[cfg(target_os = "windows")] {
+            use std::os::windows::process::CommandExt;
+            ext_cmd.creation_flags(0x08000000);
+        }
+        let _ = ext_cmd.status();
+
+        fn find_file_in_dir(dir: &Path, name: &str) -> Option<PathBuf> {
+            if let Ok(entries) = std::fs::read_dir(dir) {
+                for entry in entries.flatten() {
+                    let p = entry.path();
+                    if p.is_dir() {
+                        if let Some(found) = find_file_in_dir(&p, name) {
+                            return Some(found);
+                        }
+                    } else if p.file_name().map(|n| n.to_string_lossy().to_lowercase()) == Some(name.to_lowercase()) {
+                        return Some(p);
+                    }
+                }
+            }
+            None
+        }
+
+        if let Some(src_ffmpeg) = find_file_in_dir(&temp_extract, "ffmpeg.exe") {
+            let _ = std::fs::copy(&src_ffmpeg, bin_dir.join("ffmpeg.exe"));
+        }
+        if let Some(src_ffprobe) = find_file_in_dir(&temp_extract, "ffprobe.exe") {
+            let _ = std::fs::copy(&src_ffprobe, bin_dir.join("ffprobe.exe"));
+        }
+
+        let _ = std::fs::remove_file(&temp_zip);
+        let _ = std::fs::remove_dir_all(&temp_extract);
+
+        ensure_bin_in_user_path();
+
+        let _ = app.emit("ffmpeg-download-progress", DownloadProgressPayload {
+            stage: "done".to_string(),
+            percent: 100.0,
+            downloaded_mb: 90.0,
+            total_mb: 90.0,
+            speed: "".to_string(),
+            message: "FFmpeg configured successfully! Added to system PATH.".to_string(),
+        });
+
+        Ok(())
     }
 
     #[tauri::command]
@@ -323,16 +545,7 @@ mod commands {
 
         let stem = input.file_stem().unwrap_or_default().to_string_lossy();
 
-        // Use provided output_dir; fallback to feshorde-shod next to exe
-        let out_dir = if !output_dir.is_empty() {
-            PathBuf::from(&output_dir)
-        } else {
-            if let Ok(exe) = std::env::current_exe() {
-                exe.parent().unwrap_or_else(|| Path::new(".")).join("feshorde-shod")
-            } else {
-                PathBuf::from("feshorde-shod")
-            }
-        };
+        let out_dir = resolve_output_dir(&output_dir);
         std::fs::create_dir_all(&out_dir).map_err(|e| e.to_string())?;
         let output_path = out_dir.join(format!("{}_foshorde.mp4", stem));
 
@@ -346,7 +559,6 @@ mod commands {
             "-threads", "0",
         ]);
 
-        // Enable hardware accelerated decoding if using GPU encoder
         if enc_to_use != "cpu" {
             cmd.args(["-hwaccel", "auto"]);
         }
@@ -444,6 +656,8 @@ pub fn run() {
             commands::minimize_window,
             commands::close_window,
             commands::start_drag,
+            commands::is_ffmpeg_ready,
+            commands::download_ffmpeg,
             commands::select_video_files,
             commands::select_output_folder,
             commands::get_system_info,

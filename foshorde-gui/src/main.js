@@ -528,8 +528,8 @@ function updateOutputFolderUI(folder) {
     outFolderLabel.title = folder;
     btnOutFolder?.classList.add("custom-active");
   } else {
-    outFolderLabel.textContent = "feshorde-shod";
-    outFolderLabel.title = "Default: feshorde-shod in project folder";
+    outFolderLabel.textContent = "foshorde-output";
+    outFolderLabel.title = "Default: foshorde-output in project folder";
     btnOutFolder?.classList.remove("custom-active");
   }
 }
@@ -547,7 +547,9 @@ function loadOutputDir() {
   updateOutputFolderUI("");
 }
 
-btnOutFolder?.addEventListener("click", async () => {
+btnOutFolder?.addEventListener("click", async (e) => {
+  e.preventDefault();
+  e.stopPropagation();
   try {
     const folder = await tauriInvoke("select_output_folder");
     if (folder) {
@@ -555,11 +557,19 @@ btnOutFolder?.addEventListener("click", async () => {
       try { localStorage.setItem("foshorde_output_dir", folder); } catch {}
       updateOutputFolderUI(folder);
     }
-  } catch {}
+  } catch (err) {
+    console.error("select_output_folder error:", err);
+  }
 });
 
-btnOpenOutFolder?.addEventListener("click", () => {
-  tauriInvoke("open_folder", { folderPath: outputDir || "" }).catch(() => {});
+btnOpenOutFolder?.addEventListener("click", async (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  try {
+    await tauriInvoke("open_folder", { folderPath: outputDir || "" });
+  } catch (err) {
+    console.error("open_folder error:", err);
+  }
 });
 
 // =============================================
@@ -844,6 +854,52 @@ function setupEvents() {
 }
 
 // =============================================
+// FFmpeg Auto-Download on First Setup
+// =============================================
+const overlayDl    = document.getElementById("overlay-ffmpeg-download");
+const dlFill       = document.getElementById("dl-fill");
+const dlStatusText = document.getElementById("dl-status-text");
+const dlPctText    = document.getElementById("dl-pct-text");
+const dlMbText     = document.getElementById("dl-mb-text");
+const dlSpeedText  = document.getElementById("dl-speed-text");
+
+async function checkFFmpegSetup() {
+  try {
+    const ready = await tauriInvoke("is_ffmpeg_ready");
+    if (!ready) {
+      if (overlayDl) overlayDl.style.display = "flex";
+
+      const listen = window.__TAURI__?.event?.listen;
+      if (listen) {
+        listen("ffmpeg-download-progress", (e) => {
+          const p = e.payload;
+          if (p.percent != null && dlFill) {
+            dlFill.style.width = `${p.percent}%`;
+            if (dlPctText) dlPctText.textContent = `${Math.round(p.percent)}%`;
+          }
+          if (p.message && dlStatusText) dlStatusText.textContent = p.message;
+          if (p.downloaded_mb != null && p.total_mb != null && dlMbText) {
+            dlMbText.textContent = `${p.downloaded_mb.toFixed(1)} / ${p.total_mb.toFixed(1)} MB`;
+          }
+          if (p.speed && dlSpeedText) dlSpeedText.textContent = p.speed;
+
+          if (p.stage === "done") {
+            setTimeout(() => {
+              if (overlayDl) overlayDl.style.display = "none";
+              initSystem();
+            }, 1200);
+          }
+        });
+      }
+
+      await tauriInvoke("download_ffmpeg");
+    }
+  } catch (err) {
+    console.error("FFmpeg setup error:", err);
+  }
+}
+
+// =============================================
 // Initialization & Global Event Settings
 // =============================================
 // Disable native browser context menu on right click
@@ -868,4 +924,5 @@ window.addEventListener("DOMContentLoaded", () => {
   updateSizeDisplay();
   setupEvents();
   updateStartBtn();
+  checkFFmpegSetup();
 });

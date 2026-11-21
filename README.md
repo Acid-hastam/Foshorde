@@ -49,7 +49,7 @@
    - Choose a quick preset: **Discord (10 MB)**, **WhatsApp (16 MB)**, **Telegram (50 MB)**, or **Compact (25%)**.
    - Or drag the **Custom Slider** to dial in any exact percentage (1% to 99%).
 4. **Choose Output Folder:**
-   - Default output folder is `feshorde-shod\`.
+   - Default output folder is `foshorde-output\`.
    - Click the folder button in the footer to select a custom destination (saved automatically).
    - Click the icon next to it anytime to open the output folder in Windows Explorer.
 5. **Start:** Click **Compress** to begin. You can track live progress and cancel at any time.
@@ -70,7 +70,7 @@
                             ▼
               [ Real-time Tauri Event Stream ] ──▶ Live Progress & Speed UI
                             ▼
-       [ Optimized H.265 MP4 Output ] (feshorde-shod\)
+       [ Optimized H.265 MP4 Output ] (foshorde-output\)
 ```
 
 ---
@@ -108,7 +108,7 @@ Foshorde/
 ├── foshorde-gui/           # Tauri v2 + Rust frontend/backend source
 │   ├── src/                # HTML5, CSS3, JavaScript UI
 │   └── src-tauri/          # Rust backend, window handlers & FFmpeg manager
-└── feshorde-shod/          # Output directory for compressed videos
+└── foshorde-output/        # Output directory for compressed videos
 ```
 
 ---
