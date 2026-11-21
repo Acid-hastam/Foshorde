@@ -1,7 +1,12 @@
 <p align="center">
-  <img src="icons/png-dark/foshorde-dark-128x128.png" alt="Foshorde Logo" width="96" height="96"><br>
-  <strong>Foshorde (فشرده)</strong><br>
-  <em>Minimal. Fast. Efficient.</em><br>
+  <a href="#">
+    <img src="icons/png-dark/foshorde-dark-128x128.png" alt="Foshorde Logo" width="96" height="96">
+  </a>
+  <br>
+  <strong>Foshorde (فشرده)</strong>
+  <br>
+  <em>Minimal. Fast. Efficient.</em>
+  <br>
   A modern, high-performance Windows video compressor powered by Tauri v2, Rust, and FFmpeg with full hardware acceleration.
 </p>
 
@@ -17,12 +22,12 @@
 
 ---
 
-## Highlights in v1.4.0
+## ⚡ Highlights in v1.4.0
 
 - 🚀 **Full Hardware Acceleration (Decode + Encode):** Enables `-hwaccel auto` alongside GPU encoders (AMD AMF, NVIDIA NVENC, Intel QSV) for ultra-fast, high-framerate processing with minimal CPU usage.
 - ⚡ **Optimized Codec Presets:** Tuned AMF (`balanced`), NVENC (`p4`), and CPU (`fast`) pipelines for maximum speed without sacrificing visual fidelity.
 - 🎯 **Percentage (%) & Fixed MB Sizing Modes:** Compress videos relative to their source size (e.g., 5%, 10%, 25%, 50%) or hit target sizes tailored for platforms like Discord (10 MB), WhatsApp (16 MB), and Telegram (50 MB).
-- 📦 **Compact Standalone Desktop App (`Foshorde.exe`):** Built with Tauri v2 and Rust, weighing only ~4.7 MB with instant startup and smooth frameless window animations.
+- 📦 **Compact Standalone Desktop App (`Foshorde.exe`):** Built with Tauri v2 and Rust, weighing only ~5.2 MB with custom embedded brand icon, instant startup, and smooth frameless window animations.
 - 🔄 **Automatic PATH Registration:** On first launch, automatically ensures FFmpeg and FFprobe are connected to your Windows User PATH for system-wide availability.
 - 📁 **Smart Output Management:** Customize and persist output directories across sessions, with one-click direct access to reveal compressed videos in File Explorer.
 - 📊 **Real-time Metrics & Queue Control:** Live progress bars, encoding speed (e.g., `3.2x`), time remaining (ETA), and safe process cancellation.
@@ -30,7 +35,18 @@
 
 ---
 
-## Supported Formats
+## 🎨 Brand & Iconography
+
+Foshorde includes a dedicated custom brand identity optimized for dark mode desktop environments and high-DPI Windows displays:
+
+| Dark Mode Icon | Transparent Icon | Executable Icon |
+| :---: | :---: | :---: |
+| <img src="icons/png-dark/foshorde-dark-64x64.png" width="64" height="64" alt="Dark Icon"> | <img src="icons/png-transparent/foshorde-64x64.png" width="64" height="64" alt="Transparent Icon"> | <img src="icons/png-dark/foshorde-dark-32x32.png" width="32" height="32" alt="App Icon"> |
+| `icons/png-dark/` | `icons/png-transparent/` | `icons/foshorde.ico` |
+
+---
+
+## 🎬 Supported Formats
 
 | Category | Formats |
 | :--- | :--- |
@@ -41,9 +57,9 @@
 
 ---
 
-## Quick Start
+## 🚀 Quick Start
 
-1. **Launch:** Run `Foshorde.exe`.
+1. **Launch:** Run <img src="icons/png-transparent/foshorde-16x16.png" width="14" height="14" alt="icon" style="vertical-align: middle;"> `Foshorde.exe`.
 2. **Add Videos:** Drag and drop your video files into the top drop zone, or click to open the file picker.
 3. **Select Preset or Target:**
    - Choose a quick preset: **Discord (10 MB)**, **WhatsApp (16 MB)**, **Telegram (50 MB)**, or **Compact (25%)**.
@@ -51,12 +67,12 @@
 4. **Choose Output Folder:**
    - Default output folder is `foshorde-output\`.
    - Click the folder button in the footer to select a custom destination (saved automatically).
-   - Click the icon next to it anytime to open the output folder in Windows Explorer.
+   - Click the open button next to it anytime to reveal the output folder in Windows File Explorer.
 5. **Start:** Click **Compress** to begin. You can track live progress and cancel at any time.
 
 ---
 
-## Architecture & Workflow
+## 🛠️ Architecture & Workflow
 
 ```
 [ Input Video ] ──▶ [ FFprobe Metadata Inspection ]
@@ -75,7 +91,7 @@
 
 ---
 
-## Building from Source
+## 💻 Building from Source
 
 ### Prerequisites
 - [Rust](https://rustup.rs/) (edition 2024 / stable toolchain)
@@ -91,16 +107,19 @@ Or build through the Tauri CLI:
 cd foshorde-gui
 npx tauri build --no-bundle
 ```
-The optimized executable will be located at `foshorde-gui/src-tauri/target/release/foshorde-gui.exe` (~5.2 MB standalone).
+The optimized standalone executable with embedded branding will be located at `foshorde-gui/src-tauri/target/release/foshorde-gui.exe` (~5.2 MB).
 
 ---
 
-## Project Structure
+## 📂 Project Structure
 
 ```
 Foshorde/
-├── Foshorde.exe            # Standalone GUI application
+├── Foshorde.exe            # Standalone GUI application (embedded custom icon)
 ├── icons/                  # High-resolution brand icons (ICO, ICNS, PNG, SVG)
+│   ├── png-dark/           # Dark mode themed icons (16x16 up to 1024x1024)
+│   ├── png-transparent/    # Transparent background PNG icons
+│   └── foshorde.ico        # Multi-resolution Windows executable icon
 ├── bin/                    # Auto-downloaded FFmpeg & FFprobe binaries
 │   ├── ffmpeg.exe
 │   └── ffprobe.exe
@@ -112,6 +131,6 @@ Foshorde/
 
 ---
 
-## License
+## 📄 License
 
 This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
