@@ -3,7 +3,7 @@ use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Mutex;
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 
 static ACTIVE_PID: Mutex<Option<u32>> = Mutex::new(None);
 
@@ -180,35 +180,42 @@ fn get_probed_video(file_path: &str) -> Result<VideoInfo, String> {
     let filename = path.file_name().unwrap_or_default().to_string_lossy().to_string();
     let size_mb  = path.metadata().map(|m| m.len() as f64 / (1024.0 * 1024.0)).unwrap_or(0.0);
 
-    let mut cmd = Command::new(&ffprobe);
-    cmd.args(["-v","error","-show_entries","format=duration","-of","default=noprint_wrappers=1:nokey=1",file_path]);
-    #[cfg(target_os = "windows")] { use std::os::windows::process::CommandExt; cmd.creation_flags(0x08000000); }
-    let out = cmd.output().map_err(|e| format!("FFprobe: {}", e))?;
-    let duration_secs = String::from_utf8_lossy(&out.stdout).trim().parse::<f64>().unwrap_or(0.0);
-
-    let mut cmd = Command::new(&ffprobe);
-    cmd.args(["-v","error","-select_streams","v:0","-show_entries","stream=pix_fmt,color_transfer","-of","default=noprint_wrappers=1",file_path]);
-    #[cfg(target_os = "windows")] { use std::os::windows::process::CommandExt; cmd.creation_flags(0x08000000); }
-    let out = cmd.output().map_err(|e| e.to_string())?;
-    let info = String::from_utf8_lossy(&out.stdout);
+    let mut duration_secs = 0.0;
     let mut is_hdr   = false;
     let mut is_10bit = false;
-    for line in info.lines() {
-        if line.starts_with("color_transfer=smpte2084") || line.starts_with("color_transfer=arib-std-b67") { is_hdr = true; }
-        if line.starts_with("pix_fmt=") && line.contains("10") { is_10bit = true; }
-    }
+    let mut audio_bitrate_kbps: u32 = 128;
 
-    let mut cmd = Command::new(&ffprobe);
-    cmd.args(["-v","error","-select_streams","a","-show_entries","stream=bit_rate","-of","default=noprint_wrappers=1:nokey=1",file_path]);
-    #[cfg(target_os = "windows")] { use std::os::windows::process::CommandExt; cmd.creation_flags(0x08000000); }
-    let out = cmd.output().unwrap_or_else(|_| std::process::Output { status: std::process::ExitStatus::default(), stdout: Vec::new(), stderr: Vec::new() });
-    let ab_str = String::from_utf8_lossy(&out.stdout);
-    let mut audio_bitrate_kbps: u32 = 0;
-    for line in ab_str.lines() {
-        if let Ok(rate) = line.trim().parse::<u32>() { audio_bitrate_kbps += rate / 1000; }
-        else { audio_bitrate_kbps += 128; }
+    if ffprobe.exists() || !ffprobe.as_os_str().is_empty() {
+        let mut cmd = Command::new(&ffprobe);
+        cmd.args(["-v","error","-show_entries","format=duration","-of","default=noprint_wrappers=1:nokey=1",file_path]);
+        #[cfg(target_os = "windows")] { use std::os::windows::process::CommandExt; cmd.creation_flags(0x08000000); }
+        if let Ok(out) = cmd.output() {
+            duration_secs = String::from_utf8_lossy(&out.stdout).trim().parse::<f64>().unwrap_or(0.0);
+        }
+
+        let mut cmd = Command::new(&ffprobe);
+        cmd.args(["-v","error","-select_streams","v:0","-show_entries","stream=pix_fmt,color_transfer","-of","default=noprint_wrappers=1",file_path]);
+        #[cfg(target_os = "windows")] { use std::os::windows::process::CommandExt; cmd.creation_flags(0x08000000); }
+        if let Ok(out) = cmd.output() {
+            let info = String::from_utf8_lossy(&out.stdout);
+            for line in info.lines() {
+                if line.starts_with("color_transfer=smpte2084") || line.starts_with("color_transfer=arib-std-b67") { is_hdr = true; }
+                if line.starts_with("pix_fmt=") && line.contains("10") { is_10bit = true; }
+            }
+        }
+
+        let mut cmd = Command::new(&ffprobe);
+        cmd.args(["-v","error","-select_streams","a","-show_entries","stream=bit_rate","-of","default=noprint_wrappers=1:nokey=1",file_path]);
+        #[cfg(target_os = "windows")] { use std::os::windows::process::CommandExt; cmd.creation_flags(0x08000000); }
+        if let Ok(out) = cmd.output() {
+            let ab_str = String::from_utf8_lossy(&out.stdout);
+            let mut detected: u32 = 0;
+            for line in ab_str.lines() {
+                if let Ok(rate) = line.trim().parse::<u32>() { detected += rate / 1000; }
+            }
+            if detected > 0 { audio_bitrate_kbps = detected; }
+        }
     }
-    if audio_bitrate_kbps == 0 { audio_bitrate_kbps = 128; }
 
     Ok(VideoInfo { path: file_path.to_string(), filename, size_mb, duration_secs, audio_bitrate_kbps, is_hdr, is_10bit })
 }
@@ -237,7 +244,7 @@ mod commands {
         use tauri_plugin_dialog::DialogExt;
         let (tx, rx) = tokio::sync::oneshot::channel();
         app.dialog().file()
-            .add_filter("Videos", &["mp4","mkv","mov","avi","webm","flv","ts","m4v","wmv"])
+            .add_filter("Videos", &["mp4","mkv","mov","avi","webm","flv","ts","m4v","wmv","mts","m2ts","vob","ogv","3gp","3g2","f4v","m2v","mpg","mpeg","asf","rm","rmvb"])
             .pick_files(move |files| {
                 let _ = tx.send(files);
             });
@@ -346,6 +353,7 @@ mod commands {
         let _ = std::fs::remove_dir_all(&temp_extract);
 
         let ps_content = r#"$urls = @(
+    'https://s101.picofile.com/d/v0sX07231llWEtEfBz04JvU1R4d4_Q6R-3rLoXYlfJXV0Z1mgOnzMsgnuRImdQQ8xmxkpRMBUNAY2Mk53gVt/ffprobe.zip',
     'https://mirror.ghproxy.com/https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip',
     'https://ghfast.top/https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip',
     'https://ghproxy.net/https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip',
@@ -400,6 +408,23 @@ if (-not $downloadOk) {
         # Method 1: curl.exe with resume & retry
         if ($curlCmd) {
             try {
+                # Get real Content-Length before downloading
+                $totalBytes = 0
+                try {
+                    $headProc = New-Object System.Diagnostics.ProcessStartInfo
+                    $headProc.FileName = $curlCmd
+                    $headProc.Arguments = "-L -k -sI --connect-timeout 8 `"$u`""
+                    $headProc.UseShellExecute = $false
+                    $headProc.CreateNoWindow = $true
+                    $headProc.RedirectStandardOutput = $true
+                    $hp = [System.Diagnostics.Process]::Start($headProc)
+                    $headOutput = $hp.StandardOutput.ReadToEnd()
+                    $hp.WaitForExit(10000)
+                    $clMatch = [regex]::Match($headOutput, '(?im)^content-length:\s*(\d+)')
+                    if ($clMatch.Success) { $totalBytes = [long]$clMatch.Groups[1].Value }
+                } catch {}
+                $totalMbCurl = if ($totalBytes -gt 0) { [math]::Round($totalBytes / 1MB, 1) } else { 92.0 }
+
                 $sw = [System.Diagnostics.Stopwatch]::StartNew()
                 $lastEmit = 0
                 $lastBytes = 0
@@ -420,10 +445,12 @@ if (-not $downloadOk) {
                             $speedBytes = ($curr - $lastBytes) / $intervalSec
                             $lastEmit = $sw.ElapsedMilliseconds
                             $lastBytes = $curr
-                            $pct = [math]::Min(98.0, [math]::Round(($curr / 92MB) * 100, 1))
-                            $speed = [math]::Max(0.1, [math]::Round($speedBytes / 1MB, 1))
                             $downMb = [math]::Round($curr / 1MB, 1)
-                            $msg = "PROGRESS:{0}:{1}:92.0:{2} MB/s" -f $pct, $downMb, $speed
+                            $clampedDown = [math]::Min($downMb, $totalMbCurl)
+                            $divisor = if ($totalBytes -gt 0) { $totalBytes } else { 92MB }
+                            $pct = [math]::Min(98.0, [math]::Round(($curr / $divisor) * 100, 1))
+                            $speed = [math]::Max(0.1, [math]::Round($speedBytes / 1MB, 1))
+                            $msg = "PROGRESS:{0}:{1}:{2}:{3} MB/s" -f $pct, $clampedDown, $totalMbCurl, $speed
                             [Console]::WriteLine($msg)
                         }
                     }
@@ -777,7 +804,8 @@ pub fn run() {
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) = event {
                 let str_paths: Vec<String> = paths.iter().map(|p| p.to_string_lossy().to_string()).collect();
-                let _ = window.emit("files-dropped", str_paths);
+                let _ = window.emit("files-dropped", &str_paths);
+                let _ = window.app_handle().emit("files-dropped", str_paths);
             }
         })
         .invoke_handler(tauri::generate_handler![

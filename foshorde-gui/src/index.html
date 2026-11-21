@@ -32,7 +32,7 @@
           <div class="drop-title">Drop your video here</div>
           <div class="drop-sub">or <span class="drop-browse-link" id="drop-browse-link">click to browse</span></div>
           <div class="drop-badges">
-            <span>MP4</span><span>MKV</span><span>MOV</span><span>AVI</span><span>WEBM</span>
+            <span>MP4</span><span>MKV</span><span>MOV</span><span>AVI</span><span>WEBM</span><span>FLV</span><span>TS</span><span>WMV</span>
           </div>
         </div>
       </div>
@@ -60,7 +60,9 @@
         <!-- Two Columns Row -->
         <div class="panel-content">
           <!-- LEFT: Presets Grid -->
-          <div class="panel-left">
+          <div class="panel-left" id="panel-left">
+            <div class="scroll-glow top" id="glow-presets-top"></div>
+            <div class="scroll-glow bottom" id="glow-presets-bottom"></div>
             <div class="preset-grid" id="preset-grid">
               <!-- Rendered by JS -->
             </div>
@@ -104,7 +106,7 @@
     </div>
 
     <!-- Footer -->
-    <footer class="footer">
+    <footer class="footer" id="app-footer">
       <div class="footer-left">
         <!-- 1. Settings button (swapped to first) -->
         <button class="icon-btn" id="btn-toggle-settings" title="Settings">
@@ -230,8 +232,9 @@
       <div class="dialog-body">
         <div class="setting-row">
           <span class="setting-label">Name</span>
-          <input id="add-preset-name" class="setting-input" type="text" placeholder="e.g. YouTube" maxlength="12" />
+          <input id="add-preset-name" class="setting-input" type="text" placeholder="e.g. YouTube" maxlength="12" autocomplete="off" />
         </div>
+        <div id="add-preset-error" class="input-error-msg" style="display:none"></div>
         <div class="setting-row">
           <span class="setting-label">Target</span>
           <div style="display:flex;gap:6px;flex:1;align-items:center;">
@@ -239,7 +242,12 @@
               <button class="mode-btn active" id="add-mode-pct">%</button>
               <button class="mode-btn" id="add-mode-mb">MB</button>
             </div>
-            <input id="add-preset-val" class="setting-input num-input" type="number" min="1" max="99" value="25" />
+            <div class="stepper-wrap">
+              <button type="button" class="stepper-btn" id="btn-stepper-minus">−</button>
+              <input id="add-preset-val" class="stepper-val" type="number" min="1" max="99" value="25" />
+              <span id="add-preset-unit" class="stepper-unit">%</span>
+              <button type="button" class="stepper-btn" id="btn-stepper-plus">+</button>
+            </div>
           </div>
         </div>
         <div class="setting-actions" style="border-top:none;padding-top:4px;">
@@ -247,6 +255,9 @@
         </div>
       </div>
     </div>
+
+    <!-- Toast Notifications Container -->
+    <div id="toast-container" class="toast-container"></div>
 
     <!-- Modal: FFmpeg Auto-Download -->
     <div id="overlay-ffmpeg-download" class="download-modal-backdrop" style="display:none">
