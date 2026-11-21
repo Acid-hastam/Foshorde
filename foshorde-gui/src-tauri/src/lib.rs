@@ -801,11 +801,18 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .setup(|app| {
+            if let Some(window) = app.get_webview_window("main") {
+                if let Some(icon) = app.default_window_icon() {
+                    let _ = window.set_icon(icon.clone());
+                }
+            }
+            Ok(())
+        })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) = event {
                 let str_paths: Vec<String> = paths.iter().map(|p| p.to_string_lossy().to_string()).collect();
-                let _ = window.emit("files-dropped", &str_paths);
-                let _ = window.app_handle().emit("files-dropped", str_paths);
+                let _ = window.emit("files-dropped", str_paths);
             }
         })
         .invoke_handler(tauri::generate_handler![

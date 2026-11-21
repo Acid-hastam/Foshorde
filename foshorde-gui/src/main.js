@@ -15,7 +15,7 @@ const ICONS = {
   telegram: `<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-1.13 7.19-.14.75-.42 1-.68 1.03-.58.05-1.02-.38-1.58-.75-.88-.58-1.38-.94-2.23-1.5-.99-.65-.35-1.01.22-1.59.15-.15 2.71-2.48 2.76-2.69a.2.2 0 0 0-.05-.18c-.06-.05-.14-.03-.21-.02-.09.02-1.49.95-4.22 2.79-.4.27-.76.41-1.08.4-.36-.01-1.04-.2-1.55-.37-.63-.2-1.12-.31-1.08-.66.02-.18.27-.36.74-.55 2.92-1.27 4.86-2.11 5.83-2.51 2.78-1.16 3.35-1.36 3.73-1.36.08 0 .27.02.39.12.1.08.13.19.14.27-.01.06.01.24 0 .37z"/></svg>`,
   youtube: `<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>`,
   compact: `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/></svg>`,
-  default: `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>`
+  default: `<img src="icons/png-transparent/foshorde-32x32.png" width="18" height="18" style="display:block; object-fit:contain; pointer-events:none;" alt="Foshorde" />`
 };
 
 function getPresetIconInfo(name, iconKey) {
@@ -67,10 +67,11 @@ function showToast(msg, type = "danger", duration = 2800) {
 // Default Presets
 // =============================================
 const DEFAULT_PRESETS = [
-  { id: 1, name: "Discord",  mode: "fixed",   val: 10, icon: "discord"  },
-  { id: 2, name: "WhatsApp", mode: "fixed",   val: 16, icon: "whatsapp" },
-  { id: 3, name: "Telegram", mode: "fixed",   val: 50, icon: "telegram" },
-  { id: 4, name: "Compact",  mode: "percent", val: 25, icon: "compact"  },
+  { id: 1, name: "Discord",  mode: "fixed",   val: 10,  icon: "discord"  },
+  { id: 2, name: "WhatsApp", mode: "fixed",   val: 16,  icon: "whatsapp" },
+  { id: 3, name: "Telegram", mode: "fixed",   val: 50,  icon: "telegram" },
+  { id: 4, name: "YouTube",  mode: "fixed",   val: 100, icon: "youtube"  },
+  { id: 5, name: "Compact",  mode: "percent", val: 25,  icon: "compact"  },
 ];
 
 // =============================================
@@ -84,16 +85,21 @@ let outputDir      = "";
 
 function loadPresets() {
   try {
-    const r = localStorage.getItem("foshorde_presets_v3");
+    const r = localStorage.getItem("foshorde_presets_v4") || localStorage.getItem("foshorde_presets_v3");
     if (r) {
       const parsed = JSON.parse(r);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        if (!parsed.some((p) => (p.name || "").toLowerCase().includes("youtube"))) {
+          parsed.splice(3, 0, { id: 4, name: "YouTube", mode: "fixed", val: 100, icon: "youtube" });
+        }
+        return parsed;
+      }
     }
   } catch {}
   return JSON.parse(JSON.stringify(DEFAULT_PRESETS));
 }
 function savePresets() {
-  localStorage.setItem("foshorde_presets_v3", JSON.stringify(presets));
+  localStorage.setItem("foshorde_presets_v4", JSON.stringify(presets));
 }
 
 // =============================================
@@ -275,6 +281,13 @@ addPresetName?.addEventListener("input", () => {
   if (addPresetError) addPresetError.style.display = "none";
 });
 
+addPresetName?.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    btnConfirmAddPreset?.click();
+  }
+});
+
 btnToggleAddPreset?.addEventListener("click", () => {
   if (overlayAddPreset.style.display === "flex") {
     closeOverlay(overlayAddPreset);
@@ -341,18 +354,38 @@ btnConfirmAddPreset?.addEventListener("click", () => {
   showToast(`Preset "${name}" added ✓`, "success", 2000);
 });
 
-// Overscroll Edge Glow (Points 13 & 14 - Fixed to fire ONLY when content overflows)
-let glowTimeout = null;
-function triggerGlow(el) {
-  if (!el || !panelLeft) return;
+// Overscroll Edge Glow (Fixed: independent timeouts, only wheel at edge, never glowing opposite direction)
+let glowTimeoutTop = null;
+let glowTimeoutBottom = null;
+
+function triggerGlow(type) {
+  if (!panelLeft) return;
   const hasScroll = panelLeft.scrollHeight > panelLeft.clientHeight + 4;
   if (!hasScroll) return;
 
-  el.classList.add("active");
-  clearTimeout(glowTimeout);
-  glowTimeout = setTimeout(() => {
-    el.classList.remove("active");
-  }, 400);
+  if (type === "top") {
+    if (glowBottom) glowBottom.classList.remove("active");
+    clearTimeout(glowTimeoutBottom);
+
+    if (glowTop) {
+      glowTop.classList.add("active");
+      clearTimeout(glowTimeoutTop);
+      glowTimeoutTop = setTimeout(() => {
+        glowTop.classList.remove("active");
+      }, 350);
+    }
+  } else if (type === "bottom") {
+    if (glowTop) glowTop.classList.remove("active");
+    clearTimeout(glowTimeoutTop);
+
+    if (glowBottom) {
+      glowBottom.classList.add("active");
+      clearTimeout(glowTimeoutBottom);
+      glowTimeoutBottom = setTimeout(() => {
+        glowBottom.classList.remove("active");
+      }, 350);
+    }
+  }
 }
 
 if (panelLeft) {
@@ -361,20 +394,9 @@ if (panelLeft) {
     if (!hasScroll) return;
 
     if (e.deltaY < 0 && panelLeft.scrollTop <= 0) {
-      triggerGlow(glowTop);
+      triggerGlow("top");
     } else if (e.deltaY > 0 && panelLeft.scrollTop + panelLeft.clientHeight >= panelLeft.scrollHeight - 2) {
-      triggerGlow(glowBottom);
-    }
-  }, { passive: true });
-
-  panelLeft.addEventListener("scroll", () => {
-    const hasScroll = panelLeft.scrollHeight > panelLeft.clientHeight + 4;
-    if (!hasScroll) return;
-
-    if (panelLeft.scrollTop <= 0) {
-      triggerGlow(glowTop);
-    } else if (panelLeft.scrollTop + panelLeft.clientHeight >= panelLeft.scrollHeight - 2) {
-      triggerGlow(glowBottom);
+      triggerGlow("bottom");
     }
   }, { passive: true });
 }
@@ -850,50 +872,63 @@ btnOpenOutFolder?.addEventListener("click", async (e) => {
 });
 
 // =============================================
-// File Drop & Selection Logic
+// File Drop & Selection Logic (Deduplicated & Race-Condition Free)
 // =============================================
+const pendingFiles = new Set();
+
 async function addFile(filePath) {
   if (!filePath || typeof filePath !== "string") return;
-  if (filesQueue.some((f) => f.path === filePath)) return;
+  const normalized = filePath.trim();
+  if (filesQueue.some((f) => f.path === normalized) || pendingFiles.has(normalized)) {
+    return;
+  }
 
-  // Validate video format (Point 1 & 3)
-  const ext = filePath.split(".").pop()?.toLowerCase();
+  // Validate video format
+  const ext = normalized.split(".").pop()?.toLowerCase();
   if (!ext || !SUPPORTED_VIDEO_EXTS.has(ext)) {
     showToast("Only video files are supported!", "danger");
     return;
   }
 
+  pendingFiles.add(normalized);
   try {
-    const meta = await tauriInvoke("probe_video", { filePath });
-    filesQueue.push({
-      ...meta,
-      status: "pending",
-      progress: 0,
-      speed: "",
-      eta: "",
-      outputPath: null,
-      finalSizeMb: null,
-    });
+    const meta = await tauriInvoke("probe_video", { filePath: normalized });
+    if (!filesQueue.some((f) => f.path === normalized)) {
+      filesQueue.push({
+        ...meta,
+        status: "pending",
+        progress: 0,
+        speed: "",
+        eta: "",
+        outputPath: null,
+        finalSizeMb: null,
+      });
+      refreshUI();
+    }
   } catch (err) {
     console.warn("Probe warning, adding with default metadata:", err);
-    const filename = filePath.replace(/\\/g, "/").split("/").pop() || "video";
-    filesQueue.push({
-      path: filePath,
-      filename,
-      size_mb: 10.0,
-      duration_secs: 0.0,
-      audio_bitrate_kbps: 128,
-      is_hdr: false,
-      is_10bit: false,
-      status: "pending",
-      progress: 0,
-      speed: "",
-      eta: "",
-      outputPath: null,
-      finalSizeMb: null,
-    });
+    if (!filesQueue.some((f) => f.path === normalized)) {
+      const filename = normalized.replace(/\\/g, "/").split("/").pop() || "video";
+      filesQueue.push({
+        path: normalized,
+        filename,
+        size_mb: 10.0,
+        duration_secs: 0.0,
+        audio_bitrate_kbps: 128,
+        is_hdr: false,
+        is_10bit: false,
+        status: "pending",
+        progress: 0,
+        speed: "",
+        eta: "",
+        outputPath: null,
+        finalSizeMb: null,
+      });
+      refreshUI();
+    }
+  } finally {
+    pendingFiles.delete(normalized);
   }
-  refreshUI();
 }
 
 // Click anywhere on drop view (or browse link) to open file dialog
@@ -950,6 +985,11 @@ function openOverlay(el) {
 function closeOverlay(el) {
   if (el) el.style.display = "none";
 }
+function closeAllOverlays() {
+  closeOverlay(overlayQueue);
+  closeOverlay(overlaySets);
+  closeOverlay(overlayAddPreset);
+}
 
 document.querySelectorAll(".btn-close-overlay").forEach((btn) => {
   btn.addEventListener("click", () => {
@@ -977,6 +1017,7 @@ document.getElementById("btn-toggle-settings").addEventListener("click", () => {
 btnClearQ.addEventListener("click", () => {
   if (!isProcessing) {
     filesQueue = [];
+    closeOverlay(overlayQueue);
     refreshUI();
   }
 });
@@ -988,6 +1029,7 @@ function refreshUI() {
   const count = filesQueue.length;
 
   if (count === 0) {
+    closeOverlay(overlayQueue);
     if (dropView) {
       dropView.style.display = "flex";
       dropView.classList.remove("anim-slide-up");
@@ -1161,15 +1203,16 @@ btnStart.addEventListener("click", async () => {
   renderQueue();
   updateSizeDisplay();
 
-  // Point 9: If all files completed, clear queue after 1.2s and return to drop screen with slide-up animation
+  // Point 2 & 9: Close extra windows (Queue, Settings, Add Preset) and clear queue on completion
   const anyDone = filesQueue.some((f) => f.status === "done");
   const allFinished = filesQueue.length > 0 && filesQueue.every((f) => f.status === "done" || f.status === "cancelled");
   if (allFinished && anyDone) {
     showToast("Compression completed successfully ✓", "success", 2500);
+    closeAllOverlays();
     setTimeout(() => {
       if (!isProcessing) {
         filesQueue = [];
-        closeOverlay(overlayQueue);
+        closeAllOverlays();
         refreshUI();
       }
     }, 1200);
@@ -1186,49 +1229,19 @@ function setupEvents() {
     return;
   }
 
-  // 1. App-level custom event emitted from Rust on_window_event
+  // Single authoritative files-dropped listener (eliminates duplicate triggers)
   listen("files-dropped", async (e) => {
+    dropCard?.classList.remove("dragover");
     const paths = Array.isArray(e.payload) ? e.payload : (e.payload?.paths || []);
     for (const p of paths) await addFile(p);
   });
 
-  // 2. Tauri native window drag drop event
-  listen("tauri://drag-drop", async (e) => {
-    dropCard?.classList.remove("dragover");
-    const paths = e.payload?.paths || [];
-    for (const p of paths) await addFile(p);
-  });
   listen("tauri://drag-over", () => {
     dropCard?.classList.add("dragover");
   });
   listen("tauri://drag-leave", () => {
     dropCard?.classList.remove("dragover");
   });
-
-  // 3. WebviewWindow onDragDropEvent hook
-  try {
-    const win = window.__TAURI__?.window?.getCurrentWindow?.() || window.__TAURI__?.webviewWindow?.getCurrentWebviewWindow?.();
-    if (win?.onDragDropEvent) {
-      win.onDragDropEvent(async (e) => {
-        if (e.payload?.type === "drop") {
-          dropCard?.classList.remove("dragover");
-          for (const p of (e.payload.paths || [])) await addFile(p);
-        } else if (e.payload?.type === "enter" || e.payload?.type === "over") {
-          dropCard?.classList.add("dragover");
-        } else if (e.payload?.type === "leave") {
-          dropCard?.classList.remove("dragover");
-        }
-      });
-    }
-    if (win?.listen) {
-      win.listen("files-dropped", async (e) => {
-        const paths = Array.isArray(e.payload) ? e.payload : (e.payload?.paths || []);
-        for (const p of paths) await addFile(p);
-      });
-    }
-  } catch (err) {
-    console.warn("DragDrop hook notice:", err);
-  }
 
   // Compression progress
   listen("compression-progress", (e) => {

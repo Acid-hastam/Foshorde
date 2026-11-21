@@ -232,11 +232,13 @@
         <button class="btn-close-overlay" data-close="overlay-add-preset">✕</button>
       </div>
       <div class="dialog-body">
-        <div class="setting-row">
-          <span class="setting-label">Name</span>
-          <input id="add-preset-name" class="setting-input" type="text" placeholder="e.g. YouTube" maxlength="12" autocomplete="off" />
+        <div class="setting-row setting-row-top">
+          <span class="setting-label" style="padding-top:6px;">Name</span>
+          <div class="setting-field-col">
+            <input id="add-preset-name" class="setting-input" type="text" placeholder="e.g. YouTube" maxlength="12" autocomplete="off" />
+            <div id="add-preset-error" class="input-error-msg" style="display:none"></div>
+          </div>
         </div>
-        <div id="add-preset-error" class="input-error-msg" style="display:none"></div>
         <div class="setting-row">
           <span class="setting-label">Target</span>
           <div style="display:flex;gap:6px;flex:1;align-items:center;">

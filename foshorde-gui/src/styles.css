@@ -499,7 +499,15 @@ body {
 }
 .pc-icon-wrap.default {
   color: var(--accent);
-  background: var(--accent-dim);
+  background: rgba(79, 124, 255, 0.12);
+  padding: 3px;
+  box-sizing: border-box;
+}
+.pc-icon-wrap.default img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
 }
 
 .pc-info {
@@ -851,7 +859,18 @@ body {
 .add-preset-dialog {
   left: 75px;
   width: 300px;
-  max-height: 260px;
+  max-height: 280px;
+  height: auto;
+}
+.setting-row-top {
+  align-items: flex-start !important;
+}
+.setting-field-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
 }
 .mode-toggle {
   display: flex;
@@ -894,11 +913,11 @@ body {
   background: rgba(239, 68, 68, 0.08) !important;
 }
 .input-error-msg {
-  font-size: 10.5px;
+  font-size: 10px;
   font-weight: 600;
   color: var(--danger);
-  margin-top: -3px;
-  margin-bottom: 2px;
+  margin: 1px 0 0 0;
+  line-height: 1.2;
   animation: shake 0.2s ease-in-out;
 }
 @keyframes shake {
