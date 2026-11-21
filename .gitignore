@@ -1,6 +1,11 @@
 # Binaries & Outputs
 bin/*.exe
-feshorde-shod/
+foshorde-output/
+*.mp4
+*.mkv
+*.avi
+*.mov
+*.zip
 *.tmp
 
 # Themes local cfg
