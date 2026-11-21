@@ -524,12 +524,13 @@ sliderUseBtn.addEventListener("click", () => {
 function updateOutputFolderUI(folder) {
   if (folder) {
     const parts = folder.replace(/\\/g, "/").split("/");
-    outFolderLabel.textContent = parts[parts.length - 1] || folder;
+    const leaf = parts[parts.length - 1] || "foshorde-output";
+    outFolderLabel.textContent = leaf;
     outFolderLabel.title = folder;
     btnOutFolder?.classList.add("custom-active");
   } else {
     outFolderLabel.textContent = "foshorde-output";
-    outFolderLabel.title = "Default: foshorde-output in project folder";
+    outFolderLabel.title = "Default: foshorde-output in project directory";
     btnOutFolder?.classList.remove("custom-active");
   }
 }
@@ -553,9 +554,13 @@ btnOutFolder?.addEventListener("click", async (e) => {
   try {
     const folder = await tauriInvoke("select_output_folder");
     if (folder) {
-      outputDir = folder;
-      try { localStorage.setItem("foshorde_output_dir", folder); } catch {}
-      updateOutputFolderUI(folder);
+      let cleanFolder = folder.replace(/\\/g, "/").replace(/\/+$/, "");
+      if (!cleanFolder.toLowerCase().endsWith("foshorde-output")) {
+        cleanFolder = cleanFolder + "/foshorde-output";
+      }
+      outputDir = cleanFolder;
+      try { localStorage.setItem("foshorde_output_dir", cleanFolder); } catch {}
+      updateOutputFolderUI(cleanFolder);
     }
   } catch (err) {
     console.error("select_output_folder error:", err);
@@ -812,16 +817,6 @@ btnStart.addEventListener("click", async () => {
   updateSizeDisplay();
 });
 
-    renderQueue();
-    updateSizeDisplay();
-  }
-
-  isProcessing = false;
-  updateStartBtn();
-  renderQueue();
-  updateSizeDisplay();
-});
-
 // =============================================
 // Live Progress Listeners
 // =============================================
@@ -856,12 +851,17 @@ function setupEvents() {
 // =============================================
 // FFmpeg Auto-Download on First Setup
 // =============================================
-const overlayDl    = document.getElementById("overlay-ffmpeg-download");
-const dlFill       = document.getElementById("dl-fill");
-const dlStatusText = document.getElementById("dl-status-text");
-const dlPctText    = document.getElementById("dl-pct-text");
-const dlMbText     = document.getElementById("dl-mb-text");
-const dlSpeedText  = document.getElementById("dl-speed-text");
+const overlayDl      = document.getElementById("overlay-ffmpeg-download");
+const dlFill         = document.getElementById("dl-fill");
+const dlStatusText   = document.getElementById("dl-status-text");
+const dlPctText      = document.getElementById("dl-pct-text");
+const dlMbText       = document.getElementById("dl-mb-text");
+const dlSpeedText    = document.getElementById("dl-speed-text");
+const btnCloseDlModal = document.getElementById("btn-close-dl-modal");
+
+btnCloseDlModal?.addEventListener("click", () => {
+  if (overlayDl) overlayDl.style.display = "none";
+});
 
 async function checkFFmpegSetup() {
   try {
@@ -888,6 +888,11 @@ async function checkFFmpegSetup() {
               if (overlayDl) overlayDl.style.display = "none";
               initSystem();
             }, 1200);
+          } else if (p.stage === "error") {
+            if (dlStatusText) {
+              dlStatusText.textContent = p.message || "Download failed. Please check network.";
+              dlStatusText.style.color = "var(--danger)";
+            }
           }
         });
       }
@@ -896,6 +901,9 @@ async function checkFFmpegSetup() {
     }
   } catch (err) {
     console.error("FFmpeg setup error:", err);
+    if (dlStatusText) {
+      dlStatusText.textContent = "FFmpeg setup skipped or offline. Add bin/ffmpeg.exe manually.";
+    }
   }
 }
 

@@ -65,6 +65,36 @@ fn get_bin_path(binary: &str) -> (PathBuf, String) {
         binary.to_string()
     };
 
+    // 1. Working directory bin/
+    let local_direct = Path::new("bin").join(&bin_name);
+    if local_direct.is_file() {
+        return (local_direct, "Working dir bin".to_string());
+    }
+
+    // 2. Relative to executable and ancestor directories
+    if let Ok(current_exe) = std::env::current_exe() {
+        if let Some(exe_dir) = current_exe.parent() {
+            let candidate_bin = exe_dir.join("bin").join(&bin_name);
+            if candidate_bin.is_file() {
+                return (candidate_bin, "App bin".to_string());
+            }
+            let candidate = exe_dir.join(&bin_name);
+            if candidate.is_file() {
+                return (candidate, "Exe Folder".to_string());
+            }
+
+            let mut cur = exe_dir.to_path_buf();
+            while let Some(parent) = cur.parent() {
+                let candidate = parent.join("bin").join(&bin_name);
+                if candidate.is_file() {
+                    return (candidate, "Ancestor bin".to_string());
+                }
+                cur = parent.to_path_buf();
+            }
+        }
+    }
+
+    // 3. User & System PATH
     if let Some(path_var) = std::env::var_os("PATH") {
         for dir in std::env::split_paths(&path_var) {
             let candidate = dir.join(&bin_name);
@@ -74,36 +104,6 @@ fn get_bin_path(binary: &str) -> (PathBuf, String) {
         }
     }
 
-    if let Ok(current_exe) = std::env::current_exe() {
-        if let Some(exe_dir) = current_exe.parent() {
-            let candidate = exe_dir.join(&bin_name);
-            if candidate.is_file() {
-                return (candidate, "Exe Folder".to_string());
-            }
-            let candidate_bin = exe_dir.join("bin").join(&bin_name);
-            if candidate_bin.is_file() {
-                return (candidate_bin, "Local bin".to_string());
-            }
-            let parent_bin = exe_dir.join("..").join("bin").join(&bin_name);
-            if parent_bin.is_file() {
-                return (parent_bin, "Parent bin".to_string());
-            }
-            let root_bin = exe_dir.join("..").join("..").join("bin").join(&bin_name);
-            if root_bin.is_file() {
-                return (root_bin, "Root bin".to_string());
-            }
-        }
-    }
-
-    let local_direct = Path::new("bin").join(&bin_name);
-    if local_direct.is_file() {
-        return (local_direct, "Working dir bin".to_string());
-    }
-    let parent_bin = Path::new("..").join("bin").join(&bin_name);
-    if parent_bin.is_file() {
-        return (parent_bin, "Parent bin".to_string());
-    }
-
     (PathBuf::from(binary), "System default".to_string())
 }
 
@@ -111,20 +111,10 @@ fn ensure_bin_in_user_path() {
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
-        let mut candidates = Vec::new();
-
-        if let Ok(current_exe) = std::env::current_exe() {
-            if let Some(exe_dir) = current_exe.parent() {
-                candidates.push(exe_dir.join("bin"));
-                candidates.push(exe_dir.join("..").join("bin"));
-                candidates.push(exe_dir.to_path_buf());
-            }
-        }
-        candidates.push(PathBuf::from("bin"));
-
-        for c in candidates {
-            if c.join("ffmpeg.exe").is_file() {
-                if let Ok(canonical) = c.canonicalize() {
+        let (ffmpeg, _) = get_bin_path("ffmpeg");
+        if ffmpeg.is_file() {
+            if let Some(bin_dir) = ffmpeg.parent() {
+                if let Ok(canonical) = bin_dir.canonicalize() {
                     let path_str = canonical.to_string_lossy().trim_start_matches(r"\\?\").to_string();
                     let ps_script = format!(
                         r#"$p = [Environment]::GetEnvironmentVariable('Path', 'User'); $b = '{}'; if (($p -split ';') -notcontains $b) {{ [Environment]::SetEnvironmentVariable('Path', ($p.TrimEnd(';') + ';' + $b), 'User') }}"#,
@@ -134,7 +124,6 @@ fn ensure_bin_in_user_path() {
                         .args(["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", &ps_script])
                         .creation_flags(0x08000000)
                         .spawn();
-                    break;
                 }
             }
         }
@@ -247,21 +236,21 @@ mod commands {
 
     #[tauri::command]
     pub fn is_ffmpeg_ready() -> bool {
-        let (ffmpeg, _) = get_bin_path("ffmpeg");
-        let (ffprobe, _) = get_bin_path("ffprobe");
-        ffmpeg.is_file() && ffprobe.is_file()
+        let (ffmpeg, ffmpeg_src) = get_bin_path("ffmpeg");
+        let (ffprobe, ffprobe_src) = get_bin_path("ffprobe");
+        (ffmpeg.is_file() || ffmpeg_src == "PATH") && (ffprobe.is_file() || ffprobe_src == "PATH")
     }
 
     #[tauri::command]
     pub async fn select_video_files(app: tauri::AppHandle) -> Result<Vec<String>, String> {
         use tauri_plugin_dialog::DialogExt;
-        let (tx, rx) = std::sync::mpsc::channel();
+        let (tx, rx) = tokio::sync::oneshot::channel();
         app.dialog().file()
             .add_filter("Videos", &["mp4","mkv","mov","avi","webm","flv","ts","m4v","wmv"])
             .pick_files(move |files| {
                 let _ = tx.send(files);
             });
-        match rx.recv() {
+        match rx.await {
             Ok(Some(list)) => Ok(list.into_iter().map(|p| p.to_string()).collect()),
             _ => Ok(Vec::new()),
         }
@@ -270,11 +259,11 @@ mod commands {
     #[tauri::command]
     pub async fn select_output_folder(app: tauri::AppHandle) -> Result<Option<String>, String> {
         use tauri_plugin_dialog::DialogExt;
-        let (tx, rx) = std::sync::mpsc::channel();
+        let (tx, rx) = tokio::sync::oneshot::channel();
         app.dialog().file().pick_folder(move |folder| {
             let _ = tx.send(folder);
         });
-        match rx.recv() {
+        match rx.await {
             Ok(Some(folder)) => Ok(Some(folder.to_string())),
             _ => Ok(None),
         }
@@ -310,11 +299,17 @@ mod commands {
         let _ = std::fs::create_dir_all(&target);
         let target_str = target.to_string_lossy().to_string();
 
-        if let Err(_) = tauri_plugin_opener::open_path(&target_str, None::<&str>) {
-            #[cfg(target_os = "windows")]
-            {
-                let _ = Command::new("explorer").arg(&target_str).spawn();
-            }
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            let _ = Command::new("cmd")
+                .args(["/C", "start", "", &target_str])
+                .creation_flags(0x08000000)
+                .spawn();
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = tauri_plugin_opener::open_path(&target_str, None::<&str>);
         }
         Ok(())
     }
@@ -323,11 +318,13 @@ mod commands {
     pub fn show_in_folder(file_path: String) -> Result<(), String> {
         let p = Path::new(&file_path);
         if p.exists() {
-            if let Err(_) = tauri_plugin_opener::reveal_item_in_dir(p) {
-                #[cfg(target_os = "windows")]
-                {
-                    let _ = Command::new("explorer").arg(format!("/select,\"{}\"", file_path)).spawn();
-                }
+            #[cfg(target_os = "windows")]
+            {
+                let _ = Command::new("explorer").arg(format!("/select,{}", file_path)).spawn();
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                let _ = tauri_plugin_opener::reveal_item_in_dir(p);
             }
         }
         Ok(())
@@ -336,7 +333,16 @@ mod commands {
     #[tauri::command]
     pub async fn download_ffmpeg(app: tauri::AppHandle) -> Result<(), String> {
         let bin_dir = if let Ok(exe) = std::env::current_exe() {
-            exe.parent().unwrap_or_else(|| Path::new(".")).join("bin")
+            let mut cur = exe.parent().unwrap_or_else(|| Path::new(".")).to_path_buf();
+            let mut chosen = cur.join("bin");
+            while let Some(parent) = cur.parent() {
+                if parent.join("foshorde-gui").exists() || parent.join("bin").exists() {
+                    chosen = parent.join("bin");
+                    break;
+                }
+                cur = parent.to_path_buf();
+            }
+            chosen
         } else {
             PathBuf::from("bin")
         };

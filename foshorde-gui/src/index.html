@@ -9,8 +9,8 @@
   <body>
 
     <!-- Titlebar -->
-    <header class="titlebar" id="titlebar">
-      <div class="titlebar-left">
+    <header class="titlebar" id="titlebar" data-tauri-drag-region>
+      <div class="titlebar-left" data-tauri-drag-region>
         <svg class="brand-bolt" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
           <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
         </svg>
@@ -208,6 +208,7 @@
             <span class="dl-modal-title">Setting up FFmpeg Core</span>
             <span class="dl-modal-sub">One-time setup for fast hardware video compression</span>
           </div>
+          <button id="btn-close-dl-modal" class="btn-close-overlay" title="Close" style="margin-left:auto">✕</button>
         </div>
         <div class="dl-progress-box">
           <div class="dl-progress-bar">
