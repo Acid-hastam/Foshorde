@@ -362,85 +362,122 @@ try {
     [System.Net.WebRequest]::DefaultWebProxy.Credentials = [System.Net.CredentialCache]::DefaultCredentials
 } catch {}
 
+$curlCmd = (Get-Command 'curl.exe' -ErrorAction SilentlyContinue).Source
+$tarCmd  = (Get-Command 'tar.exe' -ErrorAction SilentlyContinue).Source
+
 $downloadOk = $false
 
-foreach ($u in $urls) {
-    if (Test-Path $ZipPath) { Remove-Item $ZipPath -Force -ErrorAction SilentlyContinue }
-    
-    # Method 1: .NET HttpWebRequest stream
-    try {
-        $req = [System.Net.HttpWebRequest]::Create($u)
-        $req.Timeout = 25000
-        $req.ReadWriteTimeout = 25000
-        $req.UserAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
-        $resp = $req.GetResponse()
-        $total = $resp.ContentLength
-        $totMb = if ($total -gt 0) { [math]::Round($total / 1MB, 1) } else { 90.0 }
-        $st = $resp.GetResponseStream()
-        $fs = [System.IO.File]::Create($ZipPath)
-        $buf = New-Object byte[] 65536
-        $curr = 0
-        $sw = [System.Diagnostics.Stopwatch]::StartNew()
-        $lastEmit = 0
-        while (($n = $st.Read($buf, 0, $buf.Length)) -gt 0) {
-            $fs.Write($buf, 0, $n)
-            $curr += $n
-            if ($sw.ElapsedMilliseconds - $lastEmit -ge 120) {
-                $lastEmit = $sw.ElapsedMilliseconds
-                $pct = if ($total -gt 0) { [math]::Min(98.0, [math]::Round(($curr / $total) * 100, 1)) } else { 50.0 }
-                $sec = [math]::Max(0.1, $sw.Elapsed.TotalSeconds)
-                $speed = [math]::Round(($curr / 1MB) / $sec, 1)
-                $downMb = [math]::Round($curr / 1MB, 1)
-                $msg = "PROGRESS:{0}:{1}:{2}:{3} MB/s" -f $pct, $downMb, $totMb, $speed
-                [Console]::WriteLine($msg)
-            }
-        }
-        $fs.Close(); $st.Close(); $resp.Close()
-        if ((Test-Path $ZipPath) -and (Get-Item $ZipPath).Length -gt 15000000) {
-            $downloadOk = $true
-            break
-        }
-    } catch {
-        if ($fs) { $fs.Close() }
-        if ($st) { $st.Close() }
-        if ($resp) { $resp.Close() }
+function Test-ZipFile($path) {
+    if (-not (Test-Path $path)) { return $false }
+    if ((Get-Item $path).Length -lt 20000000) { return $false }
+    if ($tarCmd) {
+        $pinfo = New-Object System.Diagnostics.ProcessStartInfo
+        $pinfo.FileName = $tarCmd
+        $pinfo.Arguments = "-tf `"$path`""
+        $pinfo.UseShellExecute = $false
+        $pinfo.CreateNoWindow = $true
+        $pinfo.RedirectStandardOutput = $true
+        $pinfo.RedirectStandardError = $true
+        $proc = [System.Diagnostics.Process]::Start($pinfo)
+        $proc.WaitForExit(10000)
+        return ($proc.ExitCode -eq 0)
     }
-    
-    # Method 2: curl.exe with live polling
-    if (-not $downloadOk) {
-        try {
-            $curlCmd = Get-Command 'curl.exe' -ErrorAction SilentlyContinue
-            if ($curlCmd) {
-                if (Test-Path $ZipPath) { Remove-Item $ZipPath -Force -ErrorAction SilentlyContinue }
+    return $true
+}
+
+# If existing zip is corrupt, delete it
+if (Test-Path $ZipPath) {
+    if (-not (Test-ZipFile $ZipPath)) {
+        Remove-Item $ZipPath -Force -ErrorAction SilentlyContinue
+    } else {
+        $downloadOk = $true
+    }
+}
+
+if (-not $downloadOk) {
+    foreach ($u in $urls) {
+        # Method 1: curl.exe with resume & retry
+        if ($curlCmd) {
+            try {
+                $sw = [System.Diagnostics.Stopwatch]::StartNew()
+                $lastEmit = 0
+                $lastBytes = 0
+
                 $pinfo = New-Object System.Diagnostics.ProcessStartInfo
-                $pinfo.FileName = $curlCmd.Source
-                $pinfo.Arguments = "-L -s -k --connect-timeout 20 --retry 1 -o `"$ZipPath`" `"$u`""
+                $pinfo.FileName = $curlCmd
+                $pinfo.Arguments = "-L -k -C - --connect-timeout 25 --retry 4 --retry-delay 2 --retry-connrefused -o `"$ZipPath`" `"$u`""
                 $pinfo.UseShellExecute = $false
                 $pinfo.CreateNoWindow = $true
                 $proc = [System.Diagnostics.Process]::Start($pinfo)
-                $sw = [System.Diagnostics.Stopwatch]::StartNew()
-                $lastEmit = 0
+
                 while (-not $proc.HasExited) {
-                    Start-Sleep -Milliseconds 150
+                    Start-Sleep -Milliseconds 200
                     if (Test-Path $ZipPath) {
                         $curr = (Get-Item $ZipPath).Length
-                        if ($sw.ElapsedMilliseconds - $lastEmit -ge 120) {
+                        if ($sw.ElapsedMilliseconds - $lastEmit -ge 150) {
+                            $intervalSec = [math]::Max(0.1, ($sw.ElapsedMilliseconds - $lastEmit) / 1000.0)
+                            $speedBytes = ($curr - $lastBytes) / $intervalSec
                             $lastEmit = $sw.ElapsedMilliseconds
-                            $pct = [math]::Min(98.0, [math]::Round(($curr / 90MB) * 100, 1))
-                            $sec = [math]::Max(0.1, $sw.Elapsed.TotalSeconds)
-                            $speed = [math]::Round(($curr / 1MB) / $sec, 1)
+                            $lastBytes = $curr
+                            $pct = [math]::Min(98.0, [math]::Round(($curr / 92MB) * 100, 1))
+                            $speed = [math]::Max(0.1, [math]::Round($speedBytes / 1MB, 1))
                             $downMb = [math]::Round($curr / 1MB, 1)
-                            $msg = "PROGRESS:{0}:{1}:90.0:{2} MB/s" -f $pct, $downMb, $speed
+                            $msg = "PROGRESS:{0}:{1}:92.0:{2} MB/s" -f $pct, $downMb, $speed
                             [Console]::WriteLine($msg)
                         }
                     }
                 }
-                if ((Test-Path $ZipPath) -and (Get-Item $ZipPath).Length -gt 15000000) {
+
+                if (Test-ZipFile $ZipPath) {
                     $downloadOk = $true
                     break
                 }
+            } catch {}
+        }
+
+        # Method 2: .NET HttpWebRequest stream
+        if (-not $downloadOk) {
+            try {
+                if (Test-Path $ZipPath) { Remove-Item $ZipPath -Force -ErrorAction SilentlyContinue }
+                $req = [System.Net.HttpWebRequest]::Create($u)
+                $req.Timeout = 60000
+                $req.ReadWriteTimeout = 60000
+                $req.UserAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+                $resp = $req.GetResponse()
+                $total = $resp.ContentLength
+                $totMb = if ($total -gt 0) { [math]::Round($total / 1MB, 1) } else { 92.0 }
+                $st = $resp.GetResponseStream()
+                $fs = [System.IO.File]::Create($ZipPath)
+                $buf = New-Object byte[] 65536
+                $curr = 0
+                $sw = [System.Diagnostics.Stopwatch]::StartNew()
+                $lastEmit = 0
+                while (($n = $st.Read($buf, 0, $buf.Length)) -gt 0) {
+                    $fs.Write($buf, 0, $n)
+                    $curr += $n
+                    if ($sw.ElapsedMilliseconds - $lastEmit -ge 150) {
+                        $lastEmit = $sw.ElapsedMilliseconds
+                        $totVal = if ($total -gt 0) { $total } else { 92MB }
+                        $pct = [math]::Min(98.0, [math]::Round(($curr / $totVal) * 100, 1))
+                        $sec = [math]::Max(0.1, $sw.Elapsed.TotalSeconds)
+                        $speed = [math]::Round(($curr / 1MB) / $sec, 1)
+                        $downMb = [math]::Round($curr / 1MB, 1)
+                        $msg = "PROGRESS:{0}:{1}:{2}:{3} MB/s" -f $pct, $downMb, $totMb, $speed
+                        [Console]::WriteLine($msg)
+                    }
+                }
+                $fs.Close(); $st.Close(); $resp.Close()
+
+                if (Test-ZipFile $ZipPath) {
+                    $downloadOk = $true
+                    break
+                }
+            } catch {
+                if ($fs) { $fs.Close() }
+                if ($st) { $st.Close() }
+                if ($resp) { $resp.Close() }
             }
-        } catch {}
+        }
     }
 }
 
@@ -449,11 +486,29 @@ if (-not $downloadOk) {
     exit 1
 }
 
-# Extract binaries
+# Extraction via tar.exe or Expand-Archive
 [Console]::WriteLine("STAGE:EXTRACTING")
 if (Test-Path $ExtractDir) { Remove-Item $ExtractDir -Recurse -Force -ErrorAction SilentlyContinue }
 New-Item -ItemType Directory -Path $ExtractDir -Force | Out-Null
-Expand-Archive -LiteralPath $ZipPath -DestinationPath $ExtractDir -Force
+
+$extractSuccess = $false
+if ($tarCmd) {
+    $pinfo = New-Object System.Diagnostics.ProcessStartInfo
+    $pinfo.FileName = $tarCmd
+    $pinfo.Arguments = "-xf `"$ZipPath`" -C `"$ExtractDir`""
+    $pinfo.UseShellExecute = $false
+    $pinfo.CreateNoWindow = $true
+    $proc = [System.Diagnostics.Process]::Start($pinfo)
+    $proc.WaitForExit(60000)
+    $extractSuccess = ($proc.ExitCode -eq 0)
+}
+
+if (-not $extractSuccess) {
+    try {
+        Expand-Archive -LiteralPath $ZipPath -DestinationPath $ExtractDir -Force
+        $extractSuccess = $true
+    } catch {}
+}
 
 $ffmpegSrc = Get-ChildItem -Path $ExtractDir -Filter "ffmpeg.exe" -Recurse | Select-Object -First 1
 $ffprobeSrc = Get-ChildItem -Path $ExtractDir -Filter "ffprobe.exe" -Recurse | Select-Object -First 1
