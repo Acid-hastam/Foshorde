@@ -92,6 +92,9 @@ function loadPresets() {
         if (!parsed.some((p) => (p.name || "").toLowerCase().includes("youtube"))) {
           parsed.splice(3, 0, { id: 4, name: "YouTube", mode: "fixed", val: 100, icon: "youtube" });
         }
+        parsed.forEach((p) => {
+          if (p.mode === "percent" && p.val > 99) p.val = 99;
+        });
         return parsed;
       }
     }
@@ -260,7 +263,7 @@ if (addModePct && addModeMb) {
     if (addPresetUnit) addPresetUnit.textContent = "%";
     if (addPresetVal) {
       addPresetVal.max = 99;
-      if (parseInt(addPresetVal.value, 10) > 99) addPresetVal.value = 25;
+      if (parseInt(addPresetVal.value, 10) > 99) addPresetVal.value = 99;
     }
   });
 
@@ -275,6 +278,24 @@ if (addModePct && addModeMb) {
     }
   });
 }
+
+addPresetVal?.addEventListener("input", () => {
+  if (addPresetTargetMode === "percent") {
+    let val = parseInt(addPresetVal.value, 10);
+    if (!isNaN(val)) {
+      if (val > 99) addPresetVal.value = 99;
+      else if (val < 1 && addPresetVal.value.length > 1) addPresetVal.value = 1;
+    }
+  }
+});
+
+addPresetVal?.addEventListener("blur", () => {
+  if (addPresetTargetMode === "percent") {
+    let val = parseInt(addPresetVal.value, 10);
+    if (isNaN(val) || val < 1) addPresetVal.value = 1;
+    else if (val > 99) addPresetVal.value = 99;
+  }
+});
 
 addPresetName?.addEventListener("input", () => {
   addPresetName.classList.remove("has-error");
@@ -323,7 +344,12 @@ btnConfirmAddPreset?.addEventListener("click", () => {
     return;
   }
 
-  const num = parseFloat(addPresetVal?.value) || (addPresetTargetMode === "percent" ? 25 : 10);
+  let num = parseFloat(addPresetVal?.value) || (addPresetTargetMode === "percent" ? 25 : 10);
+  if (addPresetTargetMode === "percent") {
+    num = Math.min(99, Math.max(1, Math.round(num)));
+  } else {
+    num = Math.max(1, Math.round(num));
+  }
   const iconInfo = getPresetIconInfo(name);
 
   const newPreset = {
@@ -618,6 +644,10 @@ function renderPresetGrid() {
       renderPresetGrid();
       updateSizeDisplay();
       updateStartBtn();
+
+      if (isTargetExceeding(selectedTarget, filesQueue)) {
+        showToast("Output size cannot be larger than the selected video!", "danger", 3200);
+      }
     });
   });
 
@@ -737,14 +767,23 @@ btnResetAll.addEventListener("click", () => {
 });
 
 // =============================================
-// Size Display
+// Size Display & Target Validation
 // =============================================
+function isTargetExceeding(target, queue) {
+  if (!target || !queue || !queue.length) return false;
+  if (target.mode === "percent") {
+    return target.val >= 100;
+  }
+  return queue.some((f) => target.val >= f.size_mb);
+}
+
 function updateSizeDisplay() {
   if (filesQueue.length === 0) {
     szInput.textContent  = "—";
     szOutput.textContent = "—";
     szOutput.className   = "size-val accent";
     szRatio.style.display = "none";
+    szRatio.className    = "size-ratio";
     szRatio.textContent  = "";
     return;
   }
@@ -756,6 +795,7 @@ function updateSizeDisplay() {
     szOutput.textContent = "—";
     szOutput.className   = "size-val accent";
     szRatio.style.display = "none";
+    szRatio.className    = "size-ratio";
     szRatio.textContent  = "";
     return;
   }
@@ -766,6 +806,7 @@ function updateSizeDisplay() {
     const pct = ((actualMb / totalMb) * 100).toFixed(0);
     szOutput.textContent = `${actualMb.toFixed(1)} MB`;
     szOutput.className   = "size-val green";
+    szRatio.className    = "size-ratio";
     szRatio.textContent  = `${pct}% of original`;
     szRatio.style.display = "block";
   } else {
@@ -775,11 +816,22 @@ function updateSizeDisplay() {
     } else {
       estMb = selectedTarget.val * filesQueue.length;
     }
+
+    const exceeds = isTargetExceeding(selectedTarget, filesQueue);
     szOutput.textContent = `~${estMb.toFixed(1)} MB`;
-    szOutput.className   = "size-val accent";
-    const pct = Math.min(100, Math.max(1, ((estMb / totalMb) * 100))).toFixed(0);
-    szRatio.textContent  = `~${pct}% of original`;
-    szRatio.style.display = "block";
+
+    if (exceeds) {
+      szOutput.className   = "size-val danger";
+      szRatio.className    = "size-ratio danger";
+      szRatio.textContent  = "⚠ Output exceeds original video";
+      szRatio.style.display = "block";
+    } else {
+      szOutput.className   = "size-val accent";
+      szRatio.className    = "size-ratio";
+      const pct = Math.min(100, Math.max(1, ((estMb / totalMb) * 100))).toFixed(0);
+      szRatio.textContent  = `~${pct}% of original`;
+      szRatio.style.display = "block";
+    }
   }
 }
 
@@ -787,9 +839,9 @@ function updateSizeDisplay() {
 // Custom Slider
 // =============================================
 customSlider.addEventListener("input", () => {
-  customPct.textContent = `${customSlider.value}%`;
+  const v = Math.min(99, Math.max(1, parseInt(customSlider.value, 10)));
+  customPct.textContent = `${v}%`;
   if (sliderUseBtn.classList.contains("active-custom")) {
-    const v = parseInt(customSlider.value, 10);
     selectedTarget = { presetId: null, mode: "percent", val: v, label: `${v}% (custom)` };
     updateSizeDisplay();
     updateStartBtn();
@@ -797,7 +849,7 @@ customSlider.addEventListener("input", () => {
 });
 
 sliderUseBtn.addEventListener("click", () => {
-  const v = parseInt(customSlider.value, 10);
+  const v = Math.min(99, Math.max(1, parseInt(customSlider.value, 10)));
   selectedTarget = { presetId: null, mode: "percent", val: v, label: `${v}% (custom)` };
   sliderUseBtn.classList.add("active-custom");
   renderPresetGrid();
@@ -876,7 +928,7 @@ btnOpenOutFolder?.addEventListener("click", async (e) => {
 // =============================================
 const pendingFiles = new Set();
 
-async function addFile(filePath) {
+async function addFile(filePath, doRefresh = true) {
   if (!filePath || typeof filePath !== "string") return;
   const normalized = filePath.trim();
   if (filesQueue.some((f) => f.path === normalized) || pendingFiles.has(normalized)) {
@@ -903,7 +955,7 @@ async function addFile(filePath) {
         outputPath: null,
         finalSizeMb: null,
       });
-      refreshUI();
+      if (doRefresh) refreshUI();
     }
   } catch (err) {
     console.warn("Probe warning, adding with default metadata:", err);
@@ -924,11 +976,19 @@ async function addFile(filePath) {
         outputPath: null,
         finalSizeMb: null,
       });
-      refreshUI();
+      if (doRefresh) refreshUI();
     }
   } finally {
     pendingFiles.delete(normalized);
   }
+}
+
+async function addFiles(paths) {
+  if (!paths || !paths.length) return;
+  for (const p of paths) {
+    await addFile(p, false);
+  }
+  refreshUI();
 }
 
 // Click anywhere on drop view (or browse link) to open file dialog
@@ -937,7 +997,7 @@ dropView?.addEventListener("click", async () => {
   try {
     const paths = await tauriInvoke("select_video_files");
     if (paths?.length) {
-      for (const p of paths) await addFile(p);
+      await addFiles(paths);
     }
   } catch {}
 });
@@ -949,7 +1009,7 @@ dropBarChange?.addEventListener("click", async (e) => {
   try {
     const paths = await tauriInvoke("select_video_files");
     if (paths?.length) {
-      for (const p of paths) await addFile(p);
+      await addFiles(paths);
     }
   } catch {}
 });
@@ -968,11 +1028,8 @@ window.addEventListener("drop", async (e) => {
   e.preventDefault();
   dropCard?.classList.remove("dragover");
   if (e.dataTransfer?.files?.length) {
-    for (const file of e.dataTransfer.files) {
-      if (file.path) {
-        await addFile(file.path);
-      }
-    }
+    const paths = Array.from(e.dataTransfer.files).map((f) => f.path).filter(Boolean);
+    await addFiles(paths);
   }
 });
 
@@ -1030,28 +1087,37 @@ function refreshUI() {
 
   if (count === 0) {
     closeOverlay(overlayQueue);
+    const wasDropHidden = !dropView || dropView.style.display === "none";
     if (dropView) {
       dropView.style.display = "flex";
-      dropView.classList.remove("anim-slide-up");
-      void dropView.offsetWidth; // force reflow for animation
-      dropView.classList.add("anim-slide-up");
+      if (wasDropHidden) {
+        dropView.classList.remove("anim-slide-up");
+        void dropView.offsetWidth; // force reflow for animation
+        dropView.classList.add("anim-slide-up");
+      }
     }
     if (editorView) editorView.style.display = "none";
     if (appFooter)  appFooter.style.display = "none";
     queueBadge.style.display = "none";
   } else {
-    if (dropView)   dropView.style.display = "none";
+    const wasEditorHidden = !editorView || editorView.style.display === "none";
+    if (dropView) dropView.style.display = "none";
     if (editorView) {
       editorView.style.display = "flex";
-      editorView.classList.remove("anim-slide-up");
-      void editorView.offsetWidth;
-      editorView.classList.add("anim-slide-up");
+      if (wasEditorHidden) {
+        editorView.classList.remove("anim-slide-up");
+        void editorView.offsetWidth;
+        editorView.classList.add("anim-slide-up");
+      }
     }
     if (appFooter) {
+      const wasFooterHidden = !appFooter || appFooter.style.display === "none";
       appFooter.style.display = "flex";
-      appFooter.classList.remove("anim-slide-up");
-      void appFooter.offsetWidth;
-      appFooter.classList.add("anim-slide-up");
+      if (wasFooterHidden) {
+        appFooter.classList.remove("anim-slide-up");
+        void appFooter.offsetWidth;
+        appFooter.classList.add("anim-slide-up");
+      }
     }
 
     fileCountBadge.textContent = `${count} file${count > 1 ? "s" : ""}`;
@@ -1088,6 +1154,9 @@ function updateStartBtn() {
   } else if (!selectedTarget) {
     btnStart.disabled = true;
     startLabel.textContent = "Pick a target";
+  } else if (isTargetExceeding(selectedTarget, filesQueue)) {
+    btnStart.disabled = true;
+    startLabel.textContent = "Output exceeds original";
   } else {
     btnStart.disabled = false;
     startLabel.textContent = `Compress · ${selectedTarget.label}`;
@@ -1101,10 +1170,18 @@ function renderQueue() {
   }
 
   queueList.innerHTML = filesQueue.map((f, i) => {
+    const targetMb = !selectedTarget ? 0
+      : selectedTarget.mode === "percent"
+        ? Math.max(0.1, f.size_mb * (selectedTarget.val / 100))
+        : selectedTarget.val;
     const target = !selectedTarget ? "—"
       : selectedTarget.mode === "percent"
-        ? `~${Math.max(0.1, f.size_mb * (selectedTarget.val / 100)).toFixed(1)} MB`
+        ? `~${targetMb.toFixed(1)} MB`
         : `${selectedTarget.val} MB`;
+
+    const isExceed = selectedTarget && targetMb >= f.size_mb;
+    const targetStyle = isExceed ? "color:var(--danger);font-weight:700" : "";
+    const targetDisplay = isExceed ? `${target} ⚠` : target;
 
     const sc = { pending: "var(--muted)", running: "var(--accent)", done: "var(--green)", cancelled: "var(--muted)", error: "var(--danger)" }[f.status] || "var(--muted)";
     const st = f.status === "done" && f.finalSizeMb != null
@@ -1128,7 +1205,7 @@ function renderQueue() {
       <div class="queue-item-meta">
         <span>${f.size_mb.toFixed(1)} MB</span>
         <span>→</span>
-        <span class="queue-item-target">${target}</span>
+        <span class="queue-item-target" style="${targetStyle}">${targetDisplay}</span>
         <span style="margin-left:auto;color:${sc};font-weight:700">${st}</span>
       </div>
       <div class="queue-progress-bar">
@@ -1166,6 +1243,11 @@ btnStart.addEventListener("click", async () => {
 
   if (!filesQueue.length || !selectedTarget) return;
 
+  if (isTargetExceeding(selectedTarget, filesQueue)) {
+    showToast("Output size cannot be larger than the selected video!", "danger", 3500);
+    return;
+  }
+
   isProcessing = true;
   updateStartBtn();
   const encoder = selEncoder?.value || "auto";
@@ -1186,12 +1268,22 @@ btnStart.addEventListener("click", async () => {
         encoder,
         outputDir,
       });
-      filesQueue[i].status      = "done";
-      filesQueue[i].outputPath  = res.output_path;
-      filesQueue[i].finalSizeMb = res.output_size_mb;
-      filesQueue[i].progress    = 100;
-    } catch {
+
+      if (res.output_size_mb >= filesQueue[i].size_mb) {
+        filesQueue[i].status      = "error";
+        filesQueue[i].outputPath  = res.output_path;
+        filesQueue[i].finalSizeMb = res.output_size_mb;
+        showToast("Output size is larger than the original video!", "danger", 4000);
+      } else {
+        filesQueue[i].status      = "done";
+        filesQueue[i].outputPath  = res.output_path;
+        filesQueue[i].finalSizeMb = res.output_size_mb;
+        filesQueue[i].progress    = 100;
+      }
+    } catch (err) {
       filesQueue[i].status = isProcessing ? "error" : "cancelled";
+      const errMsg = typeof err === "string" ? err : "Compression failed";
+      showToast(errMsg, "danger", 3500);
     }
 
     renderQueue();
@@ -1233,7 +1325,7 @@ function setupEvents() {
   listen("files-dropped", async (e) => {
     dropCard?.classList.remove("dragover");
     const paths = Array.isArray(e.payload) ? e.payload : (e.payload?.paths || []);
-    for (const p of paths) await addFile(p);
+    await addFiles(paths);
   });
 
   listen("tauri://drag-over", () => {

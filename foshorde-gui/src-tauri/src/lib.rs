@@ -683,6 +683,10 @@ exit 0
             target_val.max(0.5)
         };
 
+        if target_mb >= probe.size_mb {
+            return Err("Output size cannot be larger than original video!".into());
+        }
+
         let total_kbps = ((target_mb * 8.0 * 1024.0) / dur) as u32;
 
         let mut transcode_audio = false;
