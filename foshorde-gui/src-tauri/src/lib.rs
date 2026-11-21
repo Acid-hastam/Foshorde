@@ -65,13 +65,7 @@ fn get_bin_path(binary: &str) -> (PathBuf, String) {
         binary.to_string()
     };
 
-    // 1. Working directory bin/
-    let local_direct = Path::new("bin").join(&bin_name);
-    if local_direct.is_file() {
-        return (local_direct, "Working dir bin".to_string());
-    }
-
-    // 2. Relative to executable and ancestor directories
+    // 1. Inside application's own directory (bin/ or root)
     if let Ok(current_exe) = std::env::current_exe() {
         if let Some(exe_dir) = current_exe.parent() {
             let candidate_bin = exe_dir.join("bin").join(&bin_name);
@@ -82,16 +76,13 @@ fn get_bin_path(binary: &str) -> (PathBuf, String) {
             if candidate.is_file() {
                 return (candidate, "Exe Folder".to_string());
             }
-
-            let mut cur = exe_dir.to_path_buf();
-            while let Some(parent) = cur.parent() {
-                let candidate = parent.join("bin").join(&bin_name);
-                if candidate.is_file() {
-                    return (candidate, "Ancestor bin".to_string());
-                }
-                cur = parent.to_path_buf();
-            }
         }
+    }
+
+    // 2. Working directory bin/
+    let local_direct = Path::new("bin").join(&bin_name);
+    if local_direct.is_file() {
+        return (local_direct, "Working dir bin".to_string());
     }
 
     // 3. User & System PATH
@@ -104,19 +95,7 @@ fn get_bin_path(binary: &str) -> (PathBuf, String) {
         }
     }
 
-    // 4. Known directories
-    let known_paths = [
-        r"C:\Users\Amir\Desktop\Foshorde v1.4\bin",
-        r"C:\Record\Foshorde\bin",
-    ];
-    for kp in known_paths {
-        let candidate = Path::new(kp).join(&bin_name);
-        if candidate.is_file() {
-            return (candidate, "Known directory".to_string());
-        }
-    }
-
-    (PathBuf::from(binary), "System default".to_string())
+    (PathBuf::from(binary), "Not found".to_string())
 }
 
 fn ensure_bin_in_user_path() {
@@ -360,31 +339,13 @@ mod commands {
         };
         std::fs::create_dir_all(&bin_dir).map_err(|e| e.to_string())?;
 
-        // Fast-path: Check if FFmpeg already exists in any known folder on the computer
-        let (existing_ffmpeg, _) = get_bin_path("ffmpeg");
-        let (existing_ffprobe, _) = get_bin_path("ffprobe");
-        if existing_ffmpeg.is_file() && existing_ffprobe.is_file() {
-            let _ = std::fs::copy(&existing_ffmpeg, bin_dir.join("ffmpeg.exe"));
-            let _ = std::fs::copy(&existing_ffprobe, bin_dir.join("ffprobe.exe"));
-            ensure_bin_in_user_path();
-            let _ = app.emit("ffmpeg-download-progress", DownloadProgressPayload {
-                stage: "done".to_string(),
-                percent: 100.0,
-                downloaded_mb: 90.0,
-                total_mb: 90.0,
-                speed: "Instant".to_string(),
-                message: "FFmpeg core linked and ready!".to_string(),
-            });
-            return Ok(());
-        }
-
         let temp_zip = std::env::temp_dir().join("foshorde-ffmpeg.zip");
         let temp_extract = std::env::temp_dir().join("foshorde-ffmpeg-extract");
         let _ = std::fs::remove_file(&temp_zip);
         let _ = std::fs::remove_dir_all(&temp_extract);
 
         let ps_script = format!(
-            r#"$urls = @('https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip', 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip', 'https://github.com/GyanD/codexffmpeg/releases/download/7.1/ffmpeg-7.1-essentials_build.zip');
+            r#"$urls = @('https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip', 'https://mirror.ghproxy.com/https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip', 'https://ghproxy.net/https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip', 'https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip', 'https://github.com/GyanD/codexffmpeg/releases/download/7.1/ffmpeg-7.1-essentials_build.zip');
 try {{ [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]'Tls12, Tls13' }} catch {{}}
 try {{
     [System.Net.WebRequest]::DefaultWebProxy = [System.Net.WebRequest]::GetSystemWebProxy();
@@ -396,7 +357,7 @@ foreach ($u in $urls) {{
         $req = [System.Net.HttpWebRequest]::Create($u);
         $req.Timeout = 45000;
         $req.ReadWriteTimeout = 45000;
-        $req.UserAgent = 'Foshorde/1.4';
+        $req.UserAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)';
         $resp = $req.GetResponse();
         $total = $resp.ContentLength;
         $st = $resp.GetResponseStream();
@@ -408,18 +369,19 @@ foreach ($u in $urls) {{
         while (($n = $st.Read($buf, 0, $buf.Length)) -gt 0) {{
             $fs.Write($buf, 0, $n);
             $curr += $n;
-            if ($sw.ElapsedMilliseconds - $lastEmit -ge 150) {{
+            if ($sw.ElapsedMilliseconds - $lastEmit -ge 120) {{
                 $lastEmit = $sw.ElapsedMilliseconds;
-                $pct = if ($total -gt 0) {{ [math]::Round(($curr / $total) * 100, 1) }} else {{ 0.0 }};
+                $totVal = if ($total -gt 0) {{ $total }} else {{ 90MB }};
+                $pct = [math]::Min(98.0, [math]::Round(($curr / $totVal) * 100, 1));
                 $sec = [math]::Max(0.1, $sw.Elapsed.TotalSeconds);
                 $speed = [math]::Round(($curr / 1MB) / $sec, 1);
                 $downMb = [math]::Round($curr / 1MB, 1);
-                $totMb = [math]::Round($total / 1MB, 1);
+                $totMb = [math]::Round($totVal / 1MB, 1);
                 [Console]::WriteLine("PROGRESS:$pct:$downMb:$totMb:$speed MB/s");
             }}
         }}
         $fs.Close(); $st.Close(); $resp.Close();
-        if ((Test-Path '{zip_path}') -and (Get-Item '{zip_path}').Length -gt 10000000) {{
+        if ((Test-Path '{zip_path}') -and (Get-Item '{zip_path}').Length -gt 15000000) {{
             $ok = $true;
             break;
         }}
@@ -430,8 +392,30 @@ if (-not $ok) {{
         try {{
             $curl = Get-Command 'curl.exe' -ErrorAction SilentlyContinue;
             if ($curl) {{
-                & curl.exe -L --retry 2 --connect-timeout 25 -o '{zip_path}' $u;
-                if ((Test-Path '{zip_path}') -and (Get-Item '{zip_path}').Length -gt 10000000) {{
+                if (Test-Path '{zip_path}') {{ Remove-Item '{zip_path}' -Force -ErrorAction SilentlyContinue }}
+                $pinfo = New-Object System.Diagnostics.ProcessStartInfo;
+                $pinfo.FileName = 'curl.exe';
+                $pinfo.Arguments = "-L -s -k --connect-timeout 25 --retry 2 -o `"{zip_path}`" `"$u`"";
+                $pinfo.UseShellExecute = $false;
+                $pinfo.CreateNoWindow = $true;
+                $proc = [System.Diagnostics.Process]::Start($pinfo);
+                $sw = [System.Diagnostics.Stopwatch]::StartNew();
+                $lastEmit = 0;
+                while (-not $proc.HasExited) {{
+                    Start-Sleep -Milliseconds 150;
+                    if (Test-Path '{zip_path}') {{
+                        $curr = (Get-Item '{zip_path}').Length;
+                        if ($sw.ElapsedMilliseconds - $lastEmit -ge 120) {{
+                            $lastEmit = $sw.ElapsedMilliseconds;
+                            $pct = [math]::Min(98.0, [math]::Round(($curr / 90MB) * 100, 1));
+                            $sec = [math]::Max(0.1, $sw.Elapsed.TotalSeconds);
+                            $speed = [math]::Round(($curr / 1MB) / $sec, 1);
+                            $downMb = [math]::Round($curr / 1MB, 1);
+                            [Console]::WriteLine("PROGRESS:$pct:$downMb:90.0:$speed MB/s");
+                        }}
+                    }}
+                }}
+                if ((Test-Path '{zip_path}') -and (Get-Item '{zip_path}').Length -gt 15000000) {{
                     $ok = $true;
                     break;
                 }}
