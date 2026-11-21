@@ -104,6 +104,18 @@ fn get_bin_path(binary: &str) -> (PathBuf, String) {
         }
     }
 
+    // 4. Known directories
+    let known_paths = [
+        r"C:\Users\Amir\Desktop\Foshorde v1.4\bin",
+        r"C:\Record\Foshorde\bin",
+    ];
+    for kp in known_paths {
+        let candidate = Path::new(kp).join(&bin_name);
+        if candidate.is_file() {
+            return (candidate, "Known directory".to_string());
+        }
+    }
+
     (PathBuf::from(binary), "System default".to_string())
 }
 
@@ -348,19 +360,42 @@ mod commands {
         };
         std::fs::create_dir_all(&bin_dir).map_err(|e| e.to_string())?;
 
+        // Fast-path: Check if FFmpeg already exists in any known folder on the computer
+        let (existing_ffmpeg, _) = get_bin_path("ffmpeg");
+        let (existing_ffprobe, _) = get_bin_path("ffprobe");
+        if existing_ffmpeg.is_file() && existing_ffprobe.is_file() {
+            let _ = std::fs::copy(&existing_ffmpeg, bin_dir.join("ffmpeg.exe"));
+            let _ = std::fs::copy(&existing_ffprobe, bin_dir.join("ffprobe.exe"));
+            ensure_bin_in_user_path();
+            let _ = app.emit("ffmpeg-download-progress", DownloadProgressPayload {
+                stage: "done".to_string(),
+                percent: 100.0,
+                downloaded_mb: 90.0,
+                total_mb: 90.0,
+                speed: "Instant".to_string(),
+                message: "FFmpeg core linked and ready!".to_string(),
+            });
+            return Ok(());
+        }
+
         let temp_zip = std::env::temp_dir().join("foshorde-ffmpeg.zip");
         let temp_extract = std::env::temp_dir().join("foshorde-ffmpeg-extract");
         let _ = std::fs::remove_file(&temp_zip);
         let _ = std::fs::remove_dir_all(&temp_extract);
 
         let ps_script = format!(
-            r#"$urls = @('https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip', 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip');
-[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12;
+            r#"$urls = @('https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip', 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip', 'https://github.com/GyanD/codexffmpeg/releases/download/7.1/ffmpeg-7.1-essentials_build.zip');
+try {{ [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]'Tls12, Tls13' }} catch {{}}
+try {{
+    [System.Net.WebRequest]::DefaultWebProxy = [System.Net.WebRequest]::GetSystemWebProxy();
+    [System.Net.WebRequest]::DefaultWebProxy.Credentials = [System.Net.CredentialCache]::DefaultCredentials;
+}} catch {{}}
 $ok = $false;
 foreach ($u in $urls) {{
     try {{
         $req = [System.Net.HttpWebRequest]::Create($u);
-        $req.Timeout = 15000;
+        $req.Timeout = 45000;
+        $req.ReadWriteTimeout = 45000;
         $req.UserAgent = 'Foshorde/1.4';
         $resp = $req.GetResponse();
         $total = $resp.ContentLength;
@@ -384,9 +419,25 @@ foreach ($u in $urls) {{
             }}
         }}
         $fs.Close(); $st.Close(); $resp.Close();
-        $ok = $true;
-        break;
+        if ((Test-Path '{zip_path}') -and (Get-Item '{zip_path}').Length -gt 10000000) {{
+            $ok = $true;
+            break;
+        }}
     }} catch {{}}
+}}
+if (-not $ok) {{
+    foreach ($u in $urls) {{
+        try {{
+            $curl = Get-Command 'curl.exe' -ErrorAction SilentlyContinue;
+            if ($curl) {{
+                & curl.exe -L --retry 2 --connect-timeout 25 -o '{zip_path}' $u;
+                if ((Test-Path '{zip_path}') -and (Get-Item '{zip_path}').Length -gt 10000000) {{
+                    $ok = $true;
+                    break;
+                }}
+            }}
+        }} catch {{}}
+    }}
 }}
 if ($ok) {{ exit 0 }} else {{ exit 1 }}"#,
             zip_path = temp_zip.to_string_lossy().replace('\'', "''")

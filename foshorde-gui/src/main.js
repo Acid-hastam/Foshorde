@@ -858,19 +858,42 @@ const dlPctText      = document.getElementById("dl-pct-text");
 const dlMbText       = document.getElementById("dl-mb-text");
 const dlSpeedText    = document.getElementById("dl-speed-text");
 const btnCloseDlModal = document.getElementById("btn-close-dl-modal");
+const dlActions      = document.getElementById("dl-actions");
+const btnDlRetry     = document.getElementById("btn-dl-retry");
+const btnDlOffline   = document.getElementById("btn-dl-offline");
 
 btnCloseDlModal?.addEventListener("click", () => {
   if (overlayDl) overlayDl.style.display = "none";
 });
 
-async function checkFFmpegSetup() {
+btnDlOffline?.addEventListener("click", () => {
+  if (overlayDl) overlayDl.style.display = "none";
+});
+
+btnDlRetry?.addEventListener("click", () => {
+  if (dlActions) dlActions.style.display = "none";
+  if (dlStatusText) {
+    dlStatusText.textContent = "Connecting to official server...";
+    dlStatusText.style.color = "";
+  }
+  if (dlFill) dlFill.style.width = "0%";
+  if (dlPctText) dlPctText.textContent = "0%";
+  checkFFmpegSetup(true);
+});
+
+let isDlListening = false;
+
+async function checkFFmpegSetup(force = false) {
   try {
     const ready = await tauriInvoke("is_ffmpeg_ready");
-    if (!ready) {
+    if (!ready || force) {
       if (overlayDl) overlayDl.style.display = "flex";
+      if (dlActions) dlActions.style.display = "none";
+      if (dlStatusText) dlStatusText.style.color = "";
 
       const listen = window.__TAURI__?.event?.listen;
-      if (listen) {
+      if (listen && !isDlListening) {
+        isDlListening = true;
         listen("ffmpeg-download-progress", (e) => {
           const p = e.payload;
           if (p.percent != null && dlFill) {
@@ -884,15 +907,17 @@ async function checkFFmpegSetup() {
           if (p.speed && dlSpeedText) dlSpeedText.textContent = p.speed;
 
           if (p.stage === "done") {
+            if (dlActions) dlActions.style.display = "none";
             setTimeout(() => {
               if (overlayDl) overlayDl.style.display = "none";
               initSystem();
-            }, 1200);
+            }, 1000);
           } else if (p.stage === "error") {
             if (dlStatusText) {
-              dlStatusText.textContent = p.message || "Download failed. Please check network.";
+              dlStatusText.textContent = p.message || "Download failed. Check internet/VPN or add bin/ffmpeg.exe.";
               dlStatusText.style.color = "var(--danger)";
             }
+            if (dlActions) dlActions.style.display = "flex";
           }
         });
       }
@@ -902,8 +927,10 @@ async function checkFFmpegSetup() {
   } catch (err) {
     console.error("FFmpeg setup error:", err);
     if (dlStatusText) {
-      dlStatusText.textContent = "FFmpeg setup skipped or offline. Add bin/ffmpeg.exe manually.";
+      dlStatusText.textContent = "FFmpeg setup skipped or offline. You can retry with a VPN or place ffmpeg.exe in bin/.";
+      dlStatusText.style.color = "var(--danger)";
     }
+    if (dlActions) dlActions.style.display = "flex";
   }
 }
 

@@ -1108,9 +1108,21 @@ input[type="number"] {
 .dl-stats-row {
   display: flex;
   justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
   font-size: 11px;
   color: var(--text);
   font-weight: 600;
+}
+
+#dl-status-text {
+  flex: 1;
+  word-break: break-word;
+  line-height: 1.4;
+}
+
+#dl-pct-text {
+  flex-shrink: 0;
 }
 
 .dl-metrics-row {
@@ -1118,4 +1130,10 @@ input[type="number"] {
   justify-content: space-between;
   font-size: 10.5px;
   color: var(--muted);
+}
+
+.dl-actions-row {
+  display: flex;
+  gap: 10px;
+  margin-top: 4px;
 }
