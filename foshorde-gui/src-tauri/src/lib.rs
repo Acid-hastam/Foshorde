@@ -341,91 +341,150 @@ mod commands {
 
         let temp_zip = std::env::temp_dir().join("foshorde-ffmpeg.zip");
         let temp_extract = std::env::temp_dir().join("foshorde-ffmpeg-extract");
+        let script_file = std::env::temp_dir().join("foshorde_downloader.ps1");
         let _ = std::fs::remove_file(&temp_zip);
         let _ = std::fs::remove_dir_all(&temp_extract);
 
-        let ps_script = format!(
-            r#"$urls = @('https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip', 'https://mirror.ghproxy.com/https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip', 'https://ghproxy.net/https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip', 'https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip', 'https://github.com/GyanD/codexffmpeg/releases/download/7.1/ffmpeg-7.1-essentials_build.zip');
-try {{ [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]'Tls12, Tls13' }} catch {{}}
-try {{
-    [System.Net.WebRequest]::DefaultWebProxy = [System.Net.WebRequest]::GetSystemWebProxy();
-    [System.Net.WebRequest]::DefaultWebProxy.Credentials = [System.Net.CredentialCache]::DefaultCredentials;
-}} catch {{}}
-$ok = $false;
-foreach ($u in $urls) {{
-    try {{
-        $req = [System.Net.HttpWebRequest]::Create($u);
-        $req.Timeout = 45000;
-        $req.ReadWriteTimeout = 45000;
-        $req.UserAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)';
-        $resp = $req.GetResponse();
-        $total = $resp.ContentLength;
-        $st = $resp.GetResponseStream();
-        $fs = [System.IO.File]::Create('{zip_path}');
-        $buf = New-Object byte[] 65536;
-        $curr = 0;
-        $sw = [System.Diagnostics.Stopwatch]::StartNew();
-        $lastEmit = 0;
-        while (($n = $st.Read($buf, 0, $buf.Length)) -gt 0) {{
-            $fs.Write($buf, 0, $n);
-            $curr += $n;
-            if ($sw.ElapsedMilliseconds - $lastEmit -ge 120) {{
-                $lastEmit = $sw.ElapsedMilliseconds;
-                $totVal = if ($total -gt 0) {{ $total }} else {{ 90MB }};
-                $pct = [math]::Min(98.0, [math]::Round(($curr / $totVal) * 100, 1));
-                $sec = [math]::Max(0.1, $sw.Elapsed.TotalSeconds);
-                $speed = [math]::Round(($curr / 1MB) / $sec, 1);
-                $downMb = [math]::Round($curr / 1MB, 1);
-                $totMb = [math]::Round($totVal / 1MB, 1);
-                [Console]::WriteLine("PROGRESS:$pct:$downMb:$totMb:$speed MB/s");
-            }}
-        }}
-        $fs.Close(); $st.Close(); $resp.Close();
-        if ((Test-Path '{zip_path}') -and (Get-Item '{zip_path}').Length -gt 15000000) {{
-            $ok = $true;
-            break;
-        }}
-    }} catch {{}}
-}}
-if (-not $ok) {{
-    foreach ($u in $urls) {{
-        try {{
-            $curl = Get-Command 'curl.exe' -ErrorAction SilentlyContinue;
-            if ($curl) {{
-                if (Test-Path '{zip_path}') {{ Remove-Item '{zip_path}' -Force -ErrorAction SilentlyContinue }}
-                $pinfo = New-Object System.Diagnostics.ProcessStartInfo;
-                $pinfo.FileName = 'curl.exe';
-                $pinfo.Arguments = "-L -s -k --connect-timeout 25 --retry 2 -o `"{zip_path}`" `"$u`"";
-                $pinfo.UseShellExecute = $false;
-                $pinfo.CreateNoWindow = $true;
-                $proc = [System.Diagnostics.Process]::Start($pinfo);
-                $sw = [System.Diagnostics.Stopwatch]::StartNew();
-                $lastEmit = 0;
-                while (-not $proc.HasExited) {{
-                    Start-Sleep -Milliseconds 150;
-                    if (Test-Path '{zip_path}') {{
-                        $curr = (Get-Item '{zip_path}').Length;
-                        if ($sw.ElapsedMilliseconds - $lastEmit -ge 120) {{
-                            $lastEmit = $sw.ElapsedMilliseconds;
-                            $pct = [math]::Min(98.0, [math]::Round(($curr / 90MB) * 100, 1));
-                            $sec = [math]::Max(0.1, $sw.Elapsed.TotalSeconds);
-                            $speed = [math]::Round(($curr / 1MB) / $sec, 1);
-                            $downMb = [math]::Round($curr / 1MB, 1);
-                            [Console]::WriteLine("PROGRESS:$pct:$downMb:90.0:$speed MB/s");
-                        }}
-                    }}
-                }}
-                if ((Test-Path '{zip_path}') -and (Get-Item '{zip_path}').Length -gt 15000000) {{
-                    $ok = $true;
-                    break;
-                }}
-            }}
-        }} catch {{}}
-    }}
-}}
-if ($ok) {{ exit 0 }} else {{ exit 1 }}"#,
-            zip_path = temp_zip.to_string_lossy().replace('\'', "''")
-        );
+        let ps_content = r#"$urls = @(
+    'https://mirror.ghproxy.com/https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip',
+    'https://ghproxy.net/https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip',
+    'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip',
+    'https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip',
+    'https://github.com/GyanD/codexffmpeg/releases/download/7.1/ffmpeg-7.1-essentials_build.zip'
+)
+$ZipPath = $args[0]
+$ExtractDir = $args[1]
+$BinDir = $args[2]
+
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls11 -bor [Net.SecurityProtocolType]::Tls
+try {
+    [System.Net.WebRequest]::DefaultWebProxy = [System.Net.WebRequest]::GetSystemWebProxy()
+    [System.Net.WebRequest]::DefaultWebProxy.Credentials = [System.Net.CredentialCache]::DefaultCredentials
+} catch {}
+
+$downloadOk = $false
+
+foreach ($u in $urls) {
+    if (Test-Path $ZipPath) { Remove-Item $ZipPath -Force -ErrorAction SilentlyContinue }
+    
+    # Method 1: .NET HttpWebRequest stream
+    try {
+        $req = [System.Net.HttpWebRequest]::Create($u)
+        $req.Timeout = 25000
+        $req.ReadWriteTimeout = 25000
+        $req.UserAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+        $resp = $req.GetResponse()
+        $total = $resp.ContentLength
+        $totMb = if ($total -gt 0) { [math]::Round($total / 1MB, 1) } else { 90.0 }
+        $st = $resp.GetResponseStream()
+        $fs = [System.IO.File]::Create($ZipPath)
+        $buf = New-Object byte[] 65536
+        $curr = 0
+        $sw = [System.Diagnostics.Stopwatch]::StartNew()
+        $lastEmit = 0
+        while (($n = $st.Read($buf, 0, $buf.Length)) -gt 0) {
+            $fs.Write($buf, 0, $n)
+            $curr += $n
+            if ($sw.ElapsedMilliseconds - $lastEmit -ge 120) {
+                $lastEmit = $sw.ElapsedMilliseconds
+                $pct = if ($total -gt 0) { [math]::Min(98.0, [math]::Round(($curr / $total) * 100, 1)) } else { 50.0 }
+                $sec = [math]::Max(0.1, $sw.Elapsed.TotalSeconds)
+                $speed = [math]::Round(($curr / 1MB) / $sec, 1)
+                $downMb = [math]::Round($curr / 1MB, 1)
+                $msg = "PROGRESS:{0}:{1}:{2}:{3} MB/s" -f $pct, $downMb, $totMb, $speed
+                [Console]::WriteLine($msg)
+            }
+        }
+        $fs.Close(); $st.Close(); $resp.Close()
+        if ((Test-Path $ZipPath) -and (Get-Item $ZipPath).Length -gt 15000000) {
+            $downloadOk = $true
+            break
+        }
+    } catch {
+        if ($fs) { $fs.Close() }
+        if ($st) { $st.Close() }
+        if ($resp) { $resp.Close() }
+    }
+    
+    # Method 2: curl.exe with live polling
+    if (-not $downloadOk) {
+        try {
+            $curlCmd = Get-Command 'curl.exe' -ErrorAction SilentlyContinue
+            if ($curlCmd) {
+                if (Test-Path $ZipPath) { Remove-Item $ZipPath -Force -ErrorAction SilentlyContinue }
+                $pinfo = New-Object System.Diagnostics.ProcessStartInfo
+                $pinfo.FileName = $curlCmd.Source
+                $pinfo.Arguments = "-L -s -k --connect-timeout 20 --retry 1 -o `"$ZipPath`" `"$u`""
+                $pinfo.UseShellExecute = $false
+                $pinfo.CreateNoWindow = $true
+                $proc = [System.Diagnostics.Process]::Start($pinfo)
+                $sw = [System.Diagnostics.Stopwatch]::StartNew()
+                $lastEmit = 0
+                while (-not $proc.HasExited) {
+                    Start-Sleep -Milliseconds 150
+                    if (Test-Path $ZipPath) {
+                        $curr = (Get-Item $ZipPath).Length
+                        if ($sw.ElapsedMilliseconds - $lastEmit -ge 120) {
+                            $lastEmit = $sw.ElapsedMilliseconds
+                            $pct = [math]::Min(98.0, [math]::Round(($curr / 90MB) * 100, 1))
+                            $sec = [math]::Max(0.1, $sw.Elapsed.TotalSeconds)
+                            $speed = [math]::Round(($curr / 1MB) / $sec, 1)
+                            $downMb = [math]::Round($curr / 1MB, 1)
+                            $msg = "PROGRESS:{0}:{1}:90.0:{2} MB/s" -f $pct, $downMb, $speed
+                            [Console]::WriteLine($msg)
+                        }
+                    }
+                }
+                if ((Test-Path $ZipPath) -and (Get-Item $ZipPath).Length -gt 15000000) {
+                    $downloadOk = $true
+                    break
+                }
+            }
+        } catch {}
+    }
+}
+
+if (-not $downloadOk) {
+    [Console]::WriteLine("RESULT:FAILED")
+    exit 1
+}
+
+# Extract binaries
+[Console]::WriteLine("STAGE:EXTRACTING")
+if (Test-Path $ExtractDir) { Remove-Item $ExtractDir -Recurse -Force -ErrorAction SilentlyContinue }
+New-Item -ItemType Directory -Path $ExtractDir -Force | Out-Null
+Expand-Archive -LiteralPath $ZipPath -DestinationPath $ExtractDir -Force
+
+$ffmpegSrc = Get-ChildItem -Path $ExtractDir -Filter "ffmpeg.exe" -Recurse | Select-Object -First 1
+$ffprobeSrc = Get-ChildItem -Path $ExtractDir -Filter "ffprobe.exe" -Recurse | Select-Object -First 1
+
+if (-not $ffmpegSrc -or -not $ffprobeSrc) {
+    [Console]::WriteLine("RESULT:FAILED_EXTRACTION")
+    exit 1
+}
+
+New-Item -ItemType Directory -Path $BinDir -Force | Out-Null
+Copy-Item $ffmpegSrc.FullName (Join-Path $BinDir "ffmpeg.exe") -Force
+Copy-Item $ffprobeSrc.FullName (Join-Path $BinDir "ffprobe.exe") -Force
+
+Remove-Item $ZipPath -Force -ErrorAction SilentlyContinue
+Remove-Item $ExtractDir -Recurse -Force -ErrorAction SilentlyContinue
+
+# Update User PATH in Windows registry
+try {
+    $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+    $binCan = (Resolve-Path $BinDir).Path
+    if (($userPath -split ';') -notcontains $binCan) {
+        $newP = $userPath.TrimEnd(';') + ';' + $binCan + ';'
+        [Environment]::SetEnvironmentVariable('Path', $newP, 'User')
+    }
+} catch {}
+
+[Console]::WriteLine("RESULT:SUCCESS")
+exit 0
+"#;
+
+        std::fs::write(&script_file, ps_content).map_err(|e| e.to_string())?;
 
         let _ = app.emit("ffmpeg-download-progress", DownloadProgressPayload {
             stage: "connecting".to_string(),
@@ -437,7 +496,17 @@ if ($ok) {{ exit 0 }} else {{ exit 1 }}"#,
         });
 
         let mut cmd = Command::new("powershell");
-        cmd.args(["-NoProfile", "-NonInteractive", "-Command", &ps_script]);
+        cmd.args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            &script_file.to_string_lossy(),
+            &temp_zip.to_string_lossy(),
+            &temp_extract.to_string_lossy(),
+            &bin_dir.to_string_lossy(),
+        ]);
         cmd.stdout(Stdio::piped()).stderr(Stdio::null());
         #[cfg(target_os = "windows")] {
             use std::os::windows::process::CommandExt;
@@ -467,71 +536,33 @@ if ($ok) {{ exit 0 }} else {{ exit 1 }}"#,
                             message: format!("Downloading FFmpeg core ({} / {} MB)...", down_mb, tot_mb),
                         });
                     }
+                } else if t == "STAGE:EXTRACTING" {
+                    let _ = app.emit("ffmpeg-download-progress", DownloadProgressPayload {
+                        stage: "extracting".to_string(),
+                        percent: 99.0,
+                        downloaded_mb: 90.0,
+                        total_mb: 90.0,
+                        speed: "".to_string(),
+                        message: "Extracting binaries (ffmpeg.exe, ffprobe.exe)...".to_string(),
+                    });
                 }
             }
         }
 
         let status = child.wait().map_err(|e| e.to_string())?;
-        if !status.success() || !temp_zip.exists() {
+        let _ = std::fs::remove_file(&script_file);
+
+        if !status.success() || !bin_dir.join("ffmpeg.exe").exists() {
             let _ = app.emit("ffmpeg-download-progress", DownloadProgressPayload {
                 stage: "error".to_string(),
                 percent: 0.0,
                 downloaded_mb: 0.0,
                 total_mb: 0.0,
                 speed: "".to_string(),
-                message: "Failed to download FFmpeg. Please check your internet connection.".to_string(),
+                message: "Failed to download FFmpeg. Please check your internet connection or VPN.".to_string(),
             });
             return Err("Download failed".to_string());
         }
-
-        let _ = app.emit("ffmpeg-download-progress", DownloadProgressPayload {
-            stage: "extracting".to_string(),
-            percent: 99.0,
-            downloaded_mb: 90.0,
-            total_mb: 90.0,
-            speed: "".to_string(),
-            message: "Extracting binaries (ffmpeg.exe, ffprobe.exe)...".to_string(),
-        });
-
-        std::fs::create_dir_all(&temp_extract).map_err(|e| e.to_string())?;
-        let extract_script = format!(
-            r#"$z = '{}'; $d = '{}'; Expand-Archive -LiteralPath $z -DestinationPath $d -Force"#,
-            temp_zip.to_string_lossy().replace('\'', "''"),
-            temp_extract.to_string_lossy().replace('\'', "''")
-        );
-        let mut ext_cmd = Command::new("powershell");
-        ext_cmd.args(["-NoProfile", "-NonInteractive", "-Command", &extract_script]);
-        #[cfg(target_os = "windows")] {
-            use std::os::windows::process::CommandExt;
-            ext_cmd.creation_flags(0x08000000);
-        }
-        let _ = ext_cmd.status();
-
-        fn find_file_in_dir(dir: &Path, name: &str) -> Option<PathBuf> {
-            if let Ok(entries) = std::fs::read_dir(dir) {
-                for entry in entries.flatten() {
-                    let p = entry.path();
-                    if p.is_dir() {
-                        if let Some(found) = find_file_in_dir(&p, name) {
-                            return Some(found);
-                        }
-                    } else if p.file_name().map(|n| n.to_string_lossy().to_lowercase()) == Some(name.to_lowercase()) {
-                        return Some(p);
-                    }
-                }
-            }
-            None
-        }
-
-        if let Some(src_ffmpeg) = find_file_in_dir(&temp_extract, "ffmpeg.exe") {
-            let _ = std::fs::copy(&src_ffmpeg, bin_dir.join("ffmpeg.exe"));
-        }
-        if let Some(src_ffprobe) = find_file_in_dir(&temp_extract, "ffprobe.exe") {
-            let _ = std::fs::copy(&src_ffprobe, bin_dir.join("ffprobe.exe"));
-        }
-
-        let _ = std::fs::remove_file(&temp_zip);
-        let _ = std::fs::remove_dir_all(&temp_extract);
 
         ensure_bin_in_user_path();
 
