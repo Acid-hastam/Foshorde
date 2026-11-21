@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Foshorde</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+
+    <!-- Titlebar -->
+    <header class="titlebar" id="titlebar">
+      <div class="titlebar-left">
+        <svg class="brand-bolt" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+        </svg>
+        <span class="brand-name">Foshorde</span>
+        <span class="brand-ver">v1.4</span>
+      </div>
+      <div class="titlebar-right">
+        <button id="btn-win-minimize" class="win-btn" title="Minimize">─</button>
+        <button id="btn-win-close" class="win-btn close" title="Close">✕</button>
+      </div>
+    </header>
+
+    <!-- Drop Row -->
+    <div class="drop-row" id="drop-row">
+      <div class="drop-empty" id="drop-empty">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" width="16" height="16">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="17 8 12 3 7 8"/>
+          <line x1="12" y1="3" x2="12" y2="15"/>
+        </svg>
+        <span>Drop videos here or <b>click to browse</b></span>
+      </div>
+      <div class="drop-loaded" id="drop-loaded" style="display:none">
+        <span class="file-count-badge" id="file-count-badge">1 file</span>
+        <span class="file-name" id="file-name">—</span>
+        <span class="file-orig-size" id="file-orig-size">0 MB</span>
+      </div>
+    </div>
+
+    <!-- Main Panel: Left = Presets Grid, Right = Size Display & Slider -->
+    <main class="panel">
+
+      <!-- LEFT: Preset Grid -->
+      <div class="panel-left">
+        <div class="preset-grid" id="preset-grid">
+          <!-- Rendered by JS -->
+        </div>
+      </div>
+
+      <!-- Divider -->
+      <div class="panel-divider"></div>
+
+      <!-- RIGHT -->
+      <div class="panel-right">
+
+        <!-- Right Top: Size Display -->
+        <div class="size-display" id="size-display">
+          <div class="size-row">
+            <span class="size-label">INPUT</span>
+            <span class="size-val" id="sz-input">—</span>
+          </div>
+          <div class="size-arrow">↓</div>
+          <div class="size-row">
+            <span class="size-label">OUTPUT</span>
+            <span class="size-val accent" id="sz-output">—</span>
+          </div>
+          <div class="size-ratio" id="sz-ratio" style="display:none"></div>
+        </div>
+
+        <div class="right-divider"></div>
+
+        <!-- Right Bottom: Custom Slider -->
+        <div class="custom-panel">
+          <div class="custom-top">
+            <span class="custom-label">CUSTOM</span>
+            <span class="custom-pct" id="custom-pct">25%</span>
+          </div>
+          <div class="custom-slider-row">
+            <input type="range" id="custom-slider" min="1" max="99" value="25" />
+          </div>
+          <button class="use-btn" id="slider-use-btn">Use this</button>
+        </div>
+
+      </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+      <div class="footer-left">
+        <button class="icon-btn" id="btn-toggle-queue" title="Queue">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13">
+            <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/>
+            <line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>
+          </svg>
+          <span id="queue-badge" class="q-badge" style="display:none">0</span>
+        </button>
+        <button class="icon-btn" id="btn-toggle-settings" title="Settings">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="13" height="13">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+          </svg>
+        </button>
+        <div class="output-folder-group">
+          <button class="folder-btn" id="btn-out-folder" title="Click to choose output folder">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+            </svg>
+            <span id="out-folder-label">feshorde-shod</span>
+          </button>
+          <button class="icon-btn out-open-btn" id="btn-open-out-folder" title="Open output folder in Explorer">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12">
+              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+              <polyline points="15 3 21 3 21 9"/>
+              <line x1="10" y1="14" x2="21" y2="3"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+      <button id="btn-start-action" class="start-btn" disabled>
+        <span id="start-btn-label">Drop a video</span>
+      </button>
+    </footer>
+
+    <!-- Floating Draggable: Settings -->
+    <div id="overlay-settings" class="floating-dialog" style="display:none">
+      <div class="dialog-head" id="settings-drag-head">
+        <span class="dialog-title">Settings</span>
+        <button class="btn-close-overlay" data-close="overlay-settings">✕</button>
+      </div>
+      <div class="dialog-body">
+        <!-- Encoder row -->
+        <div class="setting-row">
+          <span class="setting-label">Encoder</span>
+          <div class="custom-select" id="custom-encoder-select">
+            <div class="custom-select-trigger" id="encoder-trigger">
+              <span id="encoder-selected-label">Auto (Hardware GPU)</span>
+              <span class="custom-select-arrow">▾</span>
+            </div>
+            <div class="custom-select-options" id="encoder-options" style="display:none">
+              <div class="custom-option selected" data-value="auto">Auto (Hardware GPU)</div>
+              <div class="custom-option" data-value="nvenc">NVIDIA NVENC</div>
+              <div class="custom-option" data-value="amf">AMD AMF</div>
+              <div class="custom-option" data-value="qsv">Intel Quick Sync</div>
+              <div class="custom-option" data-value="cpu">CPU (libx265)</div>
+            </div>
+          </div>
+          <input type="hidden" id="setting-encoder" value="auto" />
+        </div>
+
+        <!-- Presets section with reorder hint -->
+        <div class="dialog-section-header">
+          <span>Manage Presets</span>
+          <span class="header-hint">Drag to reorder</span>
+        </div>
+        <div id="settings-preset-list" class="settings-preset-list"></div>
+
+        <!-- Add preset inline -->
+        <div class="add-preset-form">
+          <input id="new-preset-name" class="setting-input" type="text" placeholder="Name" maxlength="12" />
+          <div class="mode-toggle">
+            <button class="mode-btn active" id="new-mode-pct">%</button>
+            <button class="mode-btn" id="new-mode-mb">MB</button>
+          </div>
+          <input id="new-preset-val" class="setting-input num-input" type="number" min="1" max="9999" value="10" />
+          <button id="btn-add-preset" class="add-btn" title="Add preset">+</button>
+        </div>
+
+        <!-- System info -->
+        <div class="setting-info">
+          <div>FFmpeg: <b id="status-ffmpeg">—</b></div>
+          <div>GPU: <b id="status-gpu">—</b></div>
+        </div>
+
+        <!-- Reset All Settings Button -->
+        <div class="setting-actions">
+          <button id="btn-reset-all" class="btn-reset-all" title="Reset all presets, encoder, and settings to default">
+            ↺ Reset All Settings
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Floating Draggable: Queue -->
+    <div id="overlay-queue" class="floating-dialog queue-dialog" style="display:none">
+      <div class="dialog-head" id="queue-drag-head">
+        <span class="dialog-title">Video Queue</span>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button id="btn-clear-queue" class="link-btn">Clear</button>
+          <button class="btn-close-overlay" data-close="overlay-queue">✕</button>
+        </div>
+      </div>
+      <div id="queue-items-container" class="dialog-body">
+        <p class="empty-note">No videos in queue.</p>
+      </div>
+    </div>
+
+    <script src="main.js"></script>
+  </body>
+</html>

@@ -1,0 +1,15 @@
+# Binaries & Outputs
+bin/*.exe
+feshorde-shod/
+*.tmp
+
+# Themes local cfg
+themes/theme.cfg
+
+# Tauri & Rust build artifacts
+target/
+foshorde-gui/src-tauri/target/
+foshorde-gui/node_modules/
+foshorde-gui/.vscode/
+foshorde-gui/dist/
+*.log
