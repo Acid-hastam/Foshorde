@@ -1,0 +1,11 @@
+{
+  "name": "foshorde",
+  "short_name": "foshorde",
+  "icons": [
+    { "src": "png-transparent/foshorde-192x192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "png-transparent/foshorde-512x512.png", "sizes": "512x512", "type": "image/png" }
+  ],
+  "theme_color": "#28353e",
+  "background_color": "#28353e",
+  "display": "standalone"
+}

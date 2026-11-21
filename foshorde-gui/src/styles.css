@@ -92,6 +92,18 @@ body {
   height: 14px;
   color: var(--accent);
 }
+.brand-icon {
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  object-fit: contain;
+}
+.brand-icon-modal {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  object-fit: contain;
+}
 .brand-name {
   font-size: 12px;
   font-weight: 700;

@@ -347,6 +347,7 @@ mod commands {
 
         let ps_content = r#"$urls = @(
     'https://mirror.ghproxy.com/https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip',
+    'https://ghfast.top/https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip',
     'https://ghproxy.net/https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip',
     'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip',
     'https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip',
@@ -405,7 +406,7 @@ if (-not $downloadOk) {
 
                 $pinfo = New-Object System.Diagnostics.ProcessStartInfo
                 $pinfo.FileName = $curlCmd
-                $pinfo.Arguments = "-L -k -C - --connect-timeout 25 --retry 4 --retry-delay 2 --retry-connrefused -o `"$ZipPath`" `"$u`""
+                $pinfo.Arguments = "-L -k -C - --connect-timeout 10 --retry 3 --retry-delay 1 --retry-connrefused -o `"$ZipPath`" `"$u`""
                 $pinfo.UseShellExecute = $false
                 $pinfo.CreateNoWindow = $true
                 $proc = [System.Diagnostics.Process]::Start($pinfo)
