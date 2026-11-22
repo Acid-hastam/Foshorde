@@ -896,6 +896,7 @@ const THEMES = [
   { id: "void", name: "Void", bg: "#000", fg: "#fff", ac: "#4d7dff" },
   { id: "terminal", name: "Terminal", bg: "#030703", fg: "#b8ffb0", ac: "#6dff5e", font: "Consolas, monospace" },
   { id: "paper", name: "Paper", bg: "#f3efe6", fg: "#161412", ac: "#c2410c", font: "Georgia, serif" },
+  { id: "brutal", name: "Brutal", bg: "#f7f2e4", fg: "#111", ac: "#ff5c39", font: "'Arial Black', sans-serif" },
 ];
 let currentTheme = "void";
 
