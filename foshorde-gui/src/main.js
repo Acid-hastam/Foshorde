@@ -894,6 +894,7 @@ window.addEventListener("keydown", (e) => {
 // =============================================
 const THEMES = [
   { id: "void", name: "Void", bg: "#000", fg: "#fff", ac: "#4d7dff" },
+  { id: "terminal", name: "Terminal", bg: "#030703", fg: "#b8ffb0", ac: "#6dff5e", font: "Consolas, monospace" },
 ];
 let currentTheme = "void";
 
