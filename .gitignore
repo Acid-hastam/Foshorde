@@ -19,3 +19,6 @@ foshorde-gui/node_modules/
 foshorde-gui/.vscode/
 foshorde-gui/dist/
 *.log
+
+# Release builds are published on GitHub Releases, not committed
+/Foshorde.exe
