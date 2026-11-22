@@ -101,6 +101,7 @@ const fx = (() => {
   const P = [];
   const sparks = [];
   const COUNT = 90;
+  let dotRGB = "200,212,255", streakRGB = "143,176,255", alphaMul = 1, style = "drift";
 
   function resize() {
     dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -152,6 +153,28 @@ const fx = (() => {
         p.vx = p.vx * 0.93 + (dx / d) * f;
         p.vy = p.vy * 0.93 + (dy / d) * f;
         if (d < 50) seed(p, true);
+      } else if (style === "rain") {
+        // falling code rain
+        p.vx *= 0.9;
+        p.vy += (0.8 + p.z * 3.2 - p.vy) * 0.05;
+        if (p.y > H + 10) { p.y = -10 - Math.random() * 40; p.x = Math.random() * W; }
+      } else if (style === "rise") {
+        // slow bubbles drifting up with a sway
+        p.vy += (-0.25 - p.z * 0.6 - p.vy) * 0.03;
+        p.vx = Math.sin((p.y + p.z * 500) * 0.015) * 0.3;
+        if (p.y < -12) { p.y = H + 12; p.x = Math.random() * W; }
+      } else if (style === "warp") {
+        // hyperspace: stars stream out of the centre
+        const ox = p.x - W / 2, oy = p.y - H / 2;
+        const d0 = Math.hypot(ox, oy) || 1;
+        const sp = 0.05 + d0 * 0.012 * (0.3 + p.z);
+        p.vx += ((ox / d0) * sp - p.vx) * 0.1;
+        p.vy += ((oy / d0) * sp - p.vy) * 0.1;
+        if (p.x < -20 || p.x > W + 20 || p.y < -20 || p.y > H + 20) {
+          p.x = W / 2 + (Math.random() - 0.5) * 80;
+          p.y = H / 2 + (Math.random() - 0.5) * 80;
+          p.vx = p.vy = 0;
+        }
       } else {
         p.vx = p.vx * 0.97 + (Math.random() - 0.5) * 0.012;
         p.vy = p.vy * 0.97 + (Math.random() - 0.5) * 0.012 - 0.0015;
@@ -162,17 +185,23 @@ const fx = (() => {
       p.y += p.vy;
 
       const v = Math.hypot(p.vx, p.vy);
-      if (v > 1.1) {
+      if (mode === "idle" && style === "rise") {
+        ctx.strokeStyle = `rgba(${dotRGB},${(0.12 + 0.3 * p.z) * alphaMul})`;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 1.5 + p.z * 3.5, 0, Math.PI * 2);
+        ctx.stroke();
+      } else if (v > 1.1) {
         const k = 3.2 + p.z * 3;
         const a = (0.1 + 0.45 * p.z) * clamp(v / 6, 0.3, 1);
-        ctx.strokeStyle = `rgba(143,176,255,${a})`;
+        ctx.strokeStyle = `rgba(${streakRGB},${a * alphaMul})`;
         ctx.lineWidth = 0.6 + p.z;
         ctx.beginPath();
         ctx.moveTo(p.x - p.vx * k, p.y - p.vy * k);
         ctx.lineTo(p.x, p.y);
         ctx.stroke();
       } else {
-        ctx.fillStyle = `rgba(200,212,255,${0.06 + 0.22 * p.z})`;
+        ctx.fillStyle = `rgba(${dotRGB},${(0.06 + 0.22 * p.z) * alphaMul})`;
         ctx.beginPath();
         ctx.arc(p.x, p.y, 0.4 + p.z * 0.9, 0, Math.PI * 2);
         ctx.fill();
@@ -200,6 +229,13 @@ const fx = (() => {
   requestAnimationFrame(frame);
 
   return {
+    refresh() {
+      const cs = getComputedStyle(document.body);
+      dotRGB = cs.getPropertyValue("--fx-dot").trim() || dotRGB;
+      streakRGB = cs.getPropertyValue("--fx-streak").trim() || streakRGB;
+      alphaMul = parseFloat(cs.getPropertyValue("--fx-alpha")) || 0;
+      style = cs.getPropertyValue("--fx-style").trim() || "drift";
+    },
     setMode(m) { mode = m; },
     getMode() { return mode; },
     setFocusEl(el) {
@@ -217,7 +253,7 @@ const fx = (() => {
           vx: Math.cos(a) * v,
           vy: Math.sin(a) * v,
           life: 0.6 + Math.random() * 0.5,
-          c: Math.random() < 0.7 ? "rgba(143,176,255,A)" : "rgba(255,255,255,A)",
+          c: Math.random() < 0.7 ? `rgba(${streakRGB},A)` : `rgba(${dotRGB},A)`,
         });
       }
     },
@@ -802,11 +838,13 @@ window.addEventListener("drop", async (e) => {
 // Drawer (queue / settings / preset)
 // =============================================
 const panels = {
+  theme: $("overlay-theme"),
   queue: $("overlay-queue"),
   settings: $("overlay-settings"),
   preset: $("overlay-add-preset"),
 };
 const panelButtons = {
+  theme: $("btn-toggle-theme"),
   queue: $("btn-toggle-queue"),
   settings: $("btn-toggle-settings"),
 };
@@ -828,6 +866,7 @@ function openPanel(name) {
   openPanelName = name;
 
   if (name === "settings") initSystem();
+  if (name === "theme") renderThemeGrid();
   if (name === "queue") renderQueue(true);
   if (name === "preset") {
     $("add-preset-error").classList.remove("on");
@@ -841,12 +880,64 @@ function closeDrawer() {
   Object.values(panelButtons).forEach((el) => el.classList.remove("active"));
   openPanelName = null;
 }
+panelButtons.theme.addEventListener("click", () => openPanel("theme"));
 panelButtons.queue.addEventListener("click", () => openPanel("queue"));
 panelButtons.settings.addEventListener("click", () => openPanel("settings"));
 scrim.addEventListener("click", closeDrawer);
 document.querySelectorAll("[data-close]").forEach((b) => b.addEventListener("click", closeDrawer));
 window.addEventListener("keydown", (e) => {
   if (e.key === "Escape") closeDrawer();
+});
+
+// =============================================
+// Themes
+// =============================================
+const THEMES = [
+  { id: "void", name: "Void", bg: "#000", fg: "#fff", ac: "#4d7dff" },
+];
+let currentTheme = "void";
+
+function renderThemeGrid() {
+  const grid = $("theme-grid");
+  grid.innerHTML = THEMES.map((t) => `
+    <button class="theme-tile ${t.id === currentTheme ? "on" : ""}" data-theme-id="${t.id}"
+      style="--t-bg:${t.bg};--t-fg:${t.fg};--t-ac:${t.ac};${t.font ? `--t-font:${t.font}` : ""}">
+      <span class="tt-prev"><b>Aa</b><i></i></span>
+      <span class="tt-name">${t.name}</span>
+    </button>`).join("");
+  grid.querySelectorAll(".theme-tile").forEach((b) => b.addEventListener("click", () => applyTheme(b.dataset.themeId, true)));
+}
+
+function applyTheme(id, animate) {
+  if (!THEMES.some((t) => t.id === id)) id = "void";
+  const swap = () => {
+    if (id === "void") delete document.body.dataset.theme;
+    else document.body.dataset.theme = id;
+    currentTheme = id;
+    fx.refresh();
+    if (openPanelName === "theme") renderThemeGrid();
+    updateIndicator(true);
+    // replay the entrance so each theme's choreography shows on switch
+    const v = views[currentView];
+    if (v) { v.classList.remove("enter"); void v.offsetWidth; v.classList.add("enter"); }
+  };
+  if (animate && document.startViewTransition) document.startViewTransition(swap);
+  else swap();
+  try { localStorage.setItem("foshorde_theme", id); } catch {}
+}
+
+function cycleTheme(dir) {
+  const i = THEMES.findIndex((t) => t.id === currentTheme);
+  const next = THEMES[(i + dir + THEMES.length) % THEMES.length];
+  applyTheme(next.id, true);
+  showToast(next.name, "success", 1100);
+}
+
+window.addEventListener("keydown", (e) => {
+  if (e.ctrlKey && (e.key === "t" || e.key === "T")) {
+    e.preventDefault();
+    cycleTheme(e.shiftKey ? -1 : 1);
+  }
 });
 
 // =============================================
@@ -1367,6 +1458,9 @@ window.addEventListener("contextmenu", (e) => e.preventDefault());
 window.addEventListener("resize", () => updateIndicator(true));
 
 window.addEventListener("DOMContentLoaded", () => {
+  let savedTheme = "void";
+  try { savedTheme = localStorage.getItem("foshorde_theme") || "void"; } catch {}
+  applyTheme(savedTheme, false);
   loadOutputDir();
   presets = loadPresets();
   encoderChoice = loadEncoder();
