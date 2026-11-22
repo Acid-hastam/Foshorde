@@ -901,6 +901,7 @@ const THEMES = [
   { id: "neon", name: "Neon", bg: "linear-gradient(180deg,#0d0221,#3b0f4e)", fg: "#ff2a6d", ac: "#05d9e8" },
   { id: "studio", name: "Studio", bg: "#141518", fg: "#ececee", ac: "#ff7a1a" },
   { id: "swiss", name: "Swiss", bg: "#fff", fg: "#111", ac: "#e30613", font: "Helvetica, Arial, sans-serif" },
+  { id: "retro", name: "Retro", bg: "#c0c0c0", fg: "#000", ac: "#000080", font: "Tahoma, sans-serif" },
 ];
 let currentTheme = "void";
 
