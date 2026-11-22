@@ -1,0 +1,154 @@
+/* Studio: pro-tool layout with a preset sidebar, mono readouts, timeline progress */
+body[data-theme="studio"] {
+  --bg: #141518;
+  --panel: #1b1c20;
+  --raise: #24262b;
+  --line: #26272c;
+  --line-2: #34363d;
+  --text: #ececee;
+  --dim: #9a9ba3;
+  --mute: #5c5e66;
+  --accent: #ff7a1a;
+  --accent-2: #ffa35c;
+  --accent-a: rgba(255,122,26,.12);
+  --acc-rgb: 255, 122, 26;
+  --acc2-rgb: 255, 163, 92;
+  --ok: #4ade80;
+  --mono: "Cascadia Mono", Consolas, monospace;
+  --hover: #24262b;
+  --track: #26272c;
+  --r-pill: 6px;
+  --btn-bg: #ff7a1a;
+  --btn-fg: #141518;
+  --btn-hover-shadow: 0 8px 24px rgba(255,122,26,.3);
+  --chip-on-bg: #2b2d33;
+  --chip-on-fg: #fff;
+  --chip-on-shadow: inset 3px 0 0 #ff7a1a;
+  --meter-track: #202126;
+  --meter-fill: #ff7a1a;
+  --glow: none;
+  --pop-bg: #1d1f23;
+  --fx-alpha: 0;
+
+  & .spotlight { display: none; }
+  & .titlebar { background: var(--panel); border-bottom: 1px solid var(--line); }
+  & .brand-name { font-weight: 600; }
+  & .brand-name::after { content: "  Studio"; color: var(--mute); font-weight: 400; }
+  & .ico-btn { border-radius: 6px; }
+
+  & .view.enter [data-s] { animation: studio-in .5s cubic-bezier(.2,.8,.2,1) both; animation-delay: calc(var(--i, 0) * 50ms); }
+
+  /* drop: framed drop area like an editor import bay */
+  & .drop-zone {
+    margin: 6px 0 12px;
+    border: 1.5px dashed var(--line-2);
+    border-radius: 12px;
+    background: repeating-linear-gradient(135deg, transparent 0 14px, rgba(255,255,255,.015) 14px 28px);
+    transition: border-color .3s, background-color .3s;
+  }
+  & .drop-zone:hover, &.dragging .drop-zone { border-color: var(--accent); background-color: rgba(255,122,26,.04); }
+  & .orb-ring, & .orb-glow { display: none; }
+  & .orb { width: clamp(110px, 22vmin, 180px); height: clamp(110px, 22vmin, 180px); }
+  & .orb-logo { width: 80%; height: 80%; }
+  & .drop-title { font-size: clamp(20px, 4vmin, 32px); font-weight: 600; }
+  & .drop-foot span { font-family: var(--mono); letter-spacing: 0; }
+
+  /* edit: sidebar + main */
+  & #view-edit.on, & #view-edit.leave {
+    display: grid;
+    grid-template-columns: clamp(190px, 28vw, 260px) 1fr;
+    grid-template-rows: auto auto auto 1fr auto;
+    grid-template-areas:
+      "side head"
+      "side hero"
+      "side custom"
+      "side ."
+      "side action";
+  }
+  & #view-edit { padding: 0; height: 100%; margin: 0; }
+  & .file-head { grid-area: head; padding: 18px 26px 0; }
+  & .hero { grid-area: hero; padding: 0 26px; }
+  & .custom-row { grid-area: custom; padding: 0 26px; }
+  & .action-row { grid-area: action; padding: 12px 26px 16px; border-top: 1px solid var(--line); margin-top: 0; }
+  & .presets {
+    grid-area: side;
+    margin: 0;
+    padding: 12px 10px;
+    background: var(--panel);
+    border-right: 1px solid var(--line);
+    overflow: hidden auto;
+  }
+  & .view.enter .presets { animation: studio-side .55s cubic-bezier(.2,.8,.2,1) both; }
+  & .presets::before {
+    content: "PRESETS";
+    display: block;
+    padding: 2px 8px 10px;
+    font-size: 9.5px;
+    font-weight: 700;
+    letter-spacing: .16em;
+    color: var(--mute);
+  }
+  & .presets-scroll { max-height: none; padding: 0; overflow: visible; }
+  & .preset-grid { flex-direction: column; flex-wrap: nowrap; gap: 2px; }
+  & .chip-indicator { height: 34px; border-radius: 6px; }
+  & .chip {
+    width: 100%;
+    height: 34px;
+    border-color: transparent;
+    border-radius: 6px;
+    padding: 0 10px;
+    transition: color .2s, background .2s, padding .25s cubic-bezier(.2,.8,.2,1);
+  }
+  & .chip:hover { background: rgba(255,255,255,.03); padding-left: 14px; }
+  & .chip.active:hover { background: transparent; }
+  & .chip-val { margin-left: auto; font-family: var(--mono); font-size: 11px; }
+  & .chip.add { width: 100%; border: 1px dashed var(--line-2); margin-top: 6px; }
+  & .chip.enter { animation: studio-row .45s cubic-bezier(.2,.8,.2,1) both; animation-delay: calc(var(--ci, 0) * 40ms + 120ms); }
+  & .chip-x { top: 9px; right: 6px; }
+
+  & .num { font-family: var(--mono); font-weight: 400; letter-spacing: -.06em; }
+  & .num .u { font-family: var(--font); }
+  & .hero-arrow span { border-radius: 1px; width: 8px; height: 2px; }
+  & .meter { height: 6px; border-radius: 3px; }
+  & .meter-fill { border-radius: 3px; }
+  & .meter-fill::after { display: none; }
+  & .file-sub, & .hero-note, & .run-stats { font-family: var(--mono); font-size: 11px; }
+  & .go-btn { height: 42px; padding: 0 8px 0 18px; }
+  & .go-arrow { width: 28px; height: 28px; border-radius: 4px; }
+  & .go-btn::before { display: none; }
+
+  /* run: timeline render with playhead over waveform bars */
+  & .press-logo { animation: stamp 1.4s cubic-bezier(.65,0,.35,1) infinite; filter: none; }
+  & .shock { display: none; }
+  & .run-pct { font-family: var(--mono); font-weight: 300; letter-spacing: -.08em; }
+  & .run-track {
+    height: 34px;
+    border-radius: 4px;
+    background:
+      linear-gradient(180deg, transparent 20%, rgba(255,255,255,.07) 20% 80%, transparent 80%) 0 0 / 3px 100%,
+      #1b1c20;
+    -webkit-mask: none;
+  }
+  & .run-fill {
+    border-radius: 4px 0 0 4px;
+    box-shadow: none;
+    background:
+      repeating-linear-gradient(90deg, rgba(255,122,26,.85) 0 2px, transparent 2px 3px),
+      rgba(255,122,26,.12);
+    -webkit-mask: linear-gradient(180deg, transparent 12%, #000 30% 70%, transparent 88%);
+            mask: linear-gradient(180deg, transparent 12%, #000 30% 70%, transparent 88%);
+    animation: studio-wave 1.2s linear infinite;
+  }
+  & .run-head { width: 2px; height: 44px; margin-top: -22px; right: -1px; border-radius: 0; background: #ff7a1a; box-shadow: 0 0 10px #ff7a1a; animation: none; }
+  & .run-head::before { content: ""; position: absolute; top: -6px; left: -4px; border: 5px solid transparent; border-top-color: #ff7a1a; }
+  & .done-big { font-family: var(--mono); font-weight: 300; letter-spacing: -.07em; }
+  & .done-check .dc-ring { filter: none; }
+
+  & .drawer { border-radius: 8px; backdrop-filter: none; }
+  & .toast { border-radius: 6px; }
+}
+
+@keyframes studio-in { from { opacity: 0; transform: translateY(8px); } }
+@keyframes studio-side { from { opacity: 0; transform: translateX(-40px); } }
+@keyframes studio-row { from { opacity: 0; transform: translateX(-18px); } }
+@keyframes studio-wave { to { background-position: 6px 0; } }

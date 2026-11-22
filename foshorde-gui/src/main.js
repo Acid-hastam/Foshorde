@@ -899,6 +899,7 @@ const THEMES = [
   { id: "brutal", name: "Brutal", bg: "#f7f2e4", fg: "#111", ac: "#ff5c39", font: "'Arial Black', sans-serif" },
   { id: "glass", name: "Aurora", bg: "linear-gradient(135deg,#5b3cc4,#0b0820 55%,#c2378f)", fg: "#fff", ac: "#7af0ff" },
   { id: "neon", name: "Neon", bg: "linear-gradient(180deg,#0d0221,#3b0f4e)", fg: "#ff2a6d", ac: "#05d9e8" },
+  { id: "studio", name: "Studio", bg: "#141518", fg: "#ececee", ac: "#ff7a1a" },
 ];
 let currentTheme = "void";
 
