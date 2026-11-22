@@ -1,0 +1,136 @@
+/* Blueprint: technical drawing on a grid, draw-on lines, crosshair, scan beam */
+body[data-theme="blueprint"] {
+  --bg: #0c3b8c;
+  --panel: #0e4299;
+  --raise: #1148a3;
+  --line: rgba(255,255,255,.25);
+  --line-2: rgba(255,255,255,.6);
+  --text: #fff;
+  --dim: rgba(255,255,255,.78);
+  --mute: rgba(255,255,255,.5);
+  --accent: #fff;
+  --accent-2: #bfe1ff;
+  --accent-a: rgba(255,255,255,.12);
+  --acc-rgb: 255, 255, 255;
+  --acc2-rgb: 191, 225, 255;
+  --danger: #ffb4b4;
+  --ok: #c6ffd9;
+  --font: "Cascadia Mono", Consolas, monospace;
+  --hover: rgba(255,255,255,.1);
+  --track: rgba(255,255,255,.15);
+  --r-pill: 0px;
+  --btn-bg: #fff;
+  --btn-fg: #0c3b8c;
+  --btn-hover-shadow: 0 0 0 4px rgba(255,255,255,.2);
+  --chip-on-bg: #fff;
+  --chip-on-fg: #0c3b8c;
+  --chip-on-shadow: none;
+  --meter-track: transparent;
+  --meter-fill: repeating-linear-gradient(45deg, rgba(255,255,255,.95) 0 1.5px, transparent 1.5px 6px);
+  --glow: none;
+  --pop-bg: #0e4299;
+  --fx-dot: 255, 255, 255;
+  --fx-streak: 191, 225, 255;
+  --fx-alpha: .5;
+  text-transform: uppercase;
+  letter-spacing: .03em;
+  background-image:
+    linear-gradient(rgba(255,255,255,.13) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,.13) 1px, transparent 1px),
+    linear-gradient(rgba(255,255,255,.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,.05) 1px, transparent 1px);
+  background-size: 80px 80px, 80px 80px, 16px 16px, 16px 16px;
+
+  /* scan beam */
+  &::after {
+    content: "";
+    position: fixed;
+    left: 0;
+    right: 0;
+    top: 0;
+    height: 2px;
+    z-index: 2;
+    pointer-events: none;
+    background: linear-gradient(90deg, transparent, rgba(191,225,255,.9), transparent);
+    box-shadow: 0 0 18px rgba(191,225,255,.7);
+    animation: bp-scan 5s ease-in-out infinite;
+  }
+  & .spotlight { display: none; }
+  & .brand-name::after { content: "  /  DWG-01"; color: var(--mute); font-weight: 400; }
+  & .ico-btn { border-radius: 0; }
+
+  /* draw on: elements reveal from a hairline */
+  & .view.enter [data-s] { animation: bp-draw .7s cubic-bezier(.65,0,.35,1) both; animation-delay: calc(var(--i, 0) * 90ms); }
+
+  & .orb-ring { border: 1px dashed var(--line-2); }
+  & .orb-ring::after { display: none; }
+  & .orb-ring.r2 { border-style: solid; border-color: var(--line); animation: spin 30s linear infinite; }
+  & .orb-ring.r1 { animation: spin 18s linear infinite reverse; }
+  & .orb-glow { display: none; }
+  & .orb::before, & .orb::after {
+    content: "";
+    position: absolute;
+    background: var(--line-2);
+    animation: spin 12s linear infinite;
+  }
+  & .orb::before { left: -24px; right: -24px; top: 50%; height: 1px; }
+  & .orb::after { top: -24px; bottom: -24px; left: 50%; width: 1px; }
+  & .drop-title { font-weight: 400; letter-spacing: .08em; font-size: clamp(22px, 4.6vmin, 40px); }
+  & .drop-sub .link { background-size: 100% 1px; background-image: linear-gradient(#fff, #fff); }
+
+  & .file-sub .tag { background: none; border: 1px solid #fff; color: #fff; }
+  & .hero { position: relative; border: 1px dashed var(--line-2); padding: 18px 16px 10px; }
+  & .hero::before { content: "FIG. 01 — OUTPUT ESTIMATE"; position: absolute; top: -7px; left: 12px; padding: 0 6px; font-size: 9.5px; background: var(--bg); color: var(--dim); }
+  & .num { font-weight: 300; letter-spacing: -.05em; text-transform: none; }
+  & .num .u { text-transform: uppercase; }
+  & .hero-arrow span { border-radius: 0; width: 10px; height: 1px; }
+
+  /* meter as a dimension line with end ticks and hatched fill */
+  & .meter { height: 18px; overflow: visible; border-radius: 0; border-left: 1px solid #fff; border-right: 1px solid #fff; }
+  & .meter::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 1px; background: var(--line-2); }
+  & .meter-fill { top: 4px; bottom: 4px; border-radius: 0; border: 1px solid #fff; animation: bp-hatch 1s linear infinite; background-size: 8.5px 8.5px; }
+  & .meter-fill::after { display: none; }
+
+  & .chip { border-style: dashed; border-color: var(--line-2); }
+  & .chip:hover { border-style: solid; color: #fff; }
+  & .chip-x { border-radius: 0; background: var(--bg); }
+  & .pill-btn { border-style: dashed; }
+  & .go-btn { border: 1px solid #fff; letter-spacing: .1em; }
+  & .go-btn::before { display: none; }
+  & .go-arrow { border-radius: 0; background: #0c3b8c; color: #fff; }
+  & input[type="range"]::-webkit-slider-thumb { border-radius: 0; width: 12px; height: 12px; margin-top: -4.5px; background: #0c3b8c; border: 1.5px solid #fff; transform: rotate(45deg); }
+
+  /* run: hatched fill along a dimension line, crosshair head */
+  & .press { border: 1px dashed var(--line-2); border-radius: 50%; }
+  & .press-logo { filter: none; }
+  & .shock { border-style: dashed; border-color: rgba(255,255,255,.6); }
+  & .run-pct { font-weight: 200; letter-spacing: -.06em; }
+  & .run-track { height: 18px; background: none; border-radius: 0; border-left: 1px solid #fff; border-right: 1px solid #fff; }
+  & .run-track::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 1px; background: var(--line-2); }
+  & .run-fill { top: 4px; bottom: 4px; border-radius: 0; box-shadow: none; background: var(--meter-fill); background-size: 8.5px 8.5px; border: 1px solid #fff; animation: bp-hatch .6s linear infinite; }
+  & .run-head { width: 18px; height: 18px; margin-top: -9px; right: -9px; border-radius: 50%; background: none; border: 1px solid #fff; box-shadow: none; animation: spin 2s linear infinite; }
+  & .run-head::before, & .run-head::after { content: ""; position: absolute; background: #fff; }
+  & .run-head::before { left: -5px; right: -5px; top: 50%; height: 1px; }
+  & .run-head::after { top: -5px; bottom: -5px; left: 50%; width: 1px; }
+  & .run-dots span { border-radius: 0; }
+  & .done-check .dc-ring { stroke: #fff; filter: none; stroke-dasharray: 6 4; animation: none !important; stroke-dashoffset: 0; }
+  & .done-big { font-weight: 200; text-transform: none; }
+  & .done-saved { border: 1px dashed #c6ffd9; background: none; }
+
+  & .drawer { border: 1px dashed var(--line-2); border-radius: 0; box-shadow: 6px 6px 0 rgba(0,0,0,.2); backdrop-filter: none; }
+  & .toast { border-radius: 0; border-style: dashed; backdrop-filter: none; }
+  & .line-input { text-transform: none; }
+}
+
+@keyframes bp-scan {
+  0% { transform: translateY(0); opacity: 0; }
+  10% { opacity: 1; }
+  90% { opacity: 1; }
+  100% { transform: translateY(100vh); opacity: 0; }
+}
+@keyframes bp-draw {
+  0% { clip-path: inset(48% 50% 48% 50%); opacity: .3; }
+  45% { clip-path: inset(48% 0 48% 0); opacity: 1; }
+  100% { clip-path: inset(0 0 0 0); opacity: 1; }
+}
+@keyframes bp-hatch { to { background-position: 8.5px 0; } }

@@ -902,6 +902,7 @@ const THEMES = [
   { id: "studio", name: "Studio", bg: "#141518", fg: "#ececee", ac: "#ff7a1a" },
   { id: "swiss", name: "Swiss", bg: "#fff", fg: "#111", ac: "#e30613", font: "Helvetica, Arial, sans-serif" },
   { id: "retro", name: "Retro", bg: "#c0c0c0", fg: "#000", ac: "#000080", font: "Tahoma, sans-serif" },
+  { id: "blueprint", name: "Blueprint", bg: "#0c3b8c", fg: "#fff", ac: "#bfe1ff", font: "Consolas, monospace" },
 ];
 let currentTheme = "void";
 
