@@ -898,6 +898,7 @@ const THEMES = [
   { id: "paper", name: "Paper", bg: "#f3efe6", fg: "#161412", ac: "#c2410c", font: "Georgia, serif" },
   { id: "brutal", name: "Brutal", bg: "#f7f2e4", fg: "#111", ac: "#ff5c39", font: "'Arial Black', sans-serif" },
   { id: "glass", name: "Aurora", bg: "linear-gradient(135deg,#5b3cc4,#0b0820 55%,#c2378f)", fg: "#fff", ac: "#7af0ff" },
+  { id: "neon", name: "Neon", bg: "linear-gradient(180deg,#0d0221,#3b0f4e)", fg: "#ff2a6d", ac: "#05d9e8" },
 ];
 let currentTheme = "void";
 
