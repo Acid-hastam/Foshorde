@@ -816,6 +816,13 @@ function openPanel(name) {
   if (openPanelName === name) { closeDrawer(); return; }
   Object.entries(panels).forEach(([k, el]) => el.classList.toggle("on", k === name));
   Object.entries(panelButtons).forEach(([k, el]) => el.classList.toggle("active", k === name));
+  // anchor the card under the button that opened it
+  const anchor = panelButtons[name] || panelButtons.settings;
+  const r = anchor.getBoundingClientRect();
+  const right = Math.max(10, window.innerWidth - r.right - 6);
+  const width = drawer.offsetWidth || 264;
+  drawer.style.setProperty("--pop-right", `${right}px`);
+  drawer.style.setProperty("--pop-origin", `${width - (window.innerWidth - right - (r.left + r.width / 2))}px`);
   drawer.classList.add("on");
   scrim.classList.add("on");
   openPanelName = name;
