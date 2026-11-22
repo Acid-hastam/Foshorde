@@ -1378,21 +1378,26 @@ function setupEvents() {
     const p = e.payload;
     const f = filesQueue.find((x) => x.path === p.path);
     if (!f) return;
-    f.progress = p.progress;
+    // a second pass re-encodes to land under the target: keep it in the last stretch
+    // of the bar instead of dropping back to zero
+    const refining = p.pass > 1;
+    const shown = refining ? 92 + p.progress * 0.075 : p.progress;
+    f.progress = shown;
     f.speed = p.speed;
     f.eta = p.eta;
     if (!isProcessing) return;
 
-    setRunProgress(p.progress);
+    setRunProgress(shown);
     const sp = parseSpeed(p.speed);
     fx.setSpeed(clamp(0.7 + Math.log2(1 + sp) * 0.45, 0.7, 2.6));
     const bits = [];
+    if (refining) bits.push(`Pass ${p.pass} · fitting to size`);
     if (p.speed) bits.push(p.speed);
     if (p.eta) bits.push(`${p.eta} left`);
     runMeta.innerHTML = bits.length ? bits.map(esc).join("<em>·</em>") : "Encoding…";
 
     const bar = $(`qbar-${filesQueue.indexOf(f)}`);
-    if (bar) bar.style.width = `${p.progress}%`;
+    if (bar) bar.style.width = `${shown}%`;
   });
 }
 

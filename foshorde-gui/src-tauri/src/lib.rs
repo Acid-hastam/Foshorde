@@ -16,6 +16,14 @@ pub struct VideoInfo {
     pub audio_bitrate_kbps: u32,
     pub is_hdr: bool,
     pub is_10bit: bool,
+    #[serde(default)]
+    pub width: u32,
+    #[serde(default)]
+    pub height: u32,
+    #[serde(default)]
+    pub fps_num: u32,
+    #[serde(default)]
+    pub fps_den: u32,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -39,6 +47,8 @@ pub struct ProgressPayload {
     pub progress: f64,
     pub speed: String,
     pub eta: String,
+    /// 1 for the first encode, 2+ when re-encoding to fit the target; 0 when done
+    pub pass: u32,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -206,6 +216,7 @@ fn get_probed_video(file_path: &str) -> Result<VideoInfo, String> {
     let mut is_hdr   = false;
     let mut is_10bit = false;
     let mut audio_bitrate_kbps: u32 = 128;
+    let (mut width, mut height, mut fps_num, mut fps_den) = (0u32, 0u32, 0u32, 0u32);
 
     if ffprobe.exists() || !ffprobe.as_os_str().is_empty() {
         let mut cmd = Command::new(&ffprobe);
@@ -216,13 +227,21 @@ fn get_probed_video(file_path: &str) -> Result<VideoInfo, String> {
         }
 
         let mut cmd = Command::new(&ffprobe);
-        cmd.args(["-v","error","-select_streams","v:0","-show_entries","stream=pix_fmt,color_transfer","-of","default=noprint_wrappers=1",file_path]);
+        cmd.args(["-v","error","-select_streams","v:0","-show_entries","stream=pix_fmt,color_transfer,width,height,avg_frame_rate,r_frame_rate","-of","default=noprint_wrappers=1",file_path]);
         #[cfg(target_os = "windows")] { use std::os::windows::process::CommandExt; cmd.creation_flags(0x08000000); }
         if let Ok(out) = cmd.output() {
             let info = String::from_utf8_lossy(&out.stdout);
             for line in info.lines() {
                 if line.starts_with("color_transfer=smpte2084") || line.starts_with("color_transfer=arib-std-b67") { is_hdr = true; }
                 if line.starts_with("pix_fmt=") && line.contains("10") { is_10bit = true; }
+                if let Some(v) = line.strip_prefix("width=") { width = v.trim().parse().unwrap_or(0); }
+                if let Some(v) = line.strip_prefix("height=") { height = v.trim().parse().unwrap_or(0); }
+                // prefer the average rate; fall back to the nominal one (VFR captures report 0/0)
+                let rate = line.strip_prefix("avg_frame_rate=").or_else(|| if fps_num == 0 { line.strip_prefix("r_frame_rate=") } else { None });
+                if let Some((n, d)) = rate.and_then(|r| r.trim().split_once('/')) {
+                    let (n, d) = (n.parse().unwrap_or(0), d.parse().unwrap_or(0));
+                    if n > 0 && d > 0 { fps_num = n; fps_den = d; }
+                }
             }
         }
 
@@ -239,7 +258,7 @@ fn get_probed_video(file_path: &str) -> Result<VideoInfo, String> {
         }
     }
 
-    Ok(VideoInfo { path: file_path.to_string(), filename, size_mb, duration_secs, audio_bitrate_kbps, is_hdr, is_10bit })
+    Ok(VideoInfo { path: file_path.to_string(), filename, size_mb, duration_secs, audio_bitrate_kbps, is_hdr, is_10bit, width, height, fps_num, fps_den })
 }
 
 mod commands {
@@ -776,10 +795,11 @@ exit 0
         let probe = get_probed_video(&input_path)?;
         let dur = if probe.duration_secs <= 1.0 { 1.0 } else { probe.duration_secs };
 
-        let target_mb = if target_mode == "percent" {
-            (probe.size_mb * (target_val / 100.0)).max(0.2)
-        } else {
+        let fixed_target = target_mode != "percent";
+        let target_mb = if fixed_target {
             target_val.max(0.5)
+        } else {
+            (probe.size_mb * (target_val / 100.0)).max(0.2)
         };
 
         if target_mb >= probe.size_mb {
@@ -796,105 +816,168 @@ exit 0
         else if audio_kbps > 256  { audio_kbps = 128; transcode_audio = true; }
 
         let mut vkbps = if total_kbps > audio_kbps { total_kbps - audio_kbps } else { 64 };
-        vkbps = (vkbps as f64 * 0.97) as u32;
-        if vkbps < 64 { vkbps = 64; }
-        let maxk = vkbps * 3 / 2;
-        let bufk = maxk * 2;
+        vkbps = ((vkbps as f64 * 0.97) as u32).max(64);
 
         let stem = input.file_stem().unwrap_or_default().to_string_lossy();
-
         let out_dir = resolve_output_dir(&output_dir);
         std::fs::create_dir_all(&out_dir).map_err(|e| e.to_string())?;
         let output_path = out_dir.join(format!("{}_foshorde.mp4", stem));
 
-        let enc_to_use = if encoder == "auto" {
+        let enc = if encoder == "auto" {
             if probe.is_hdr || probe.is_10bit { "cpu".to_string() } else { get_detected_encoder().encoder }
         } else { encoder };
 
-        let mut cmd = Command::new(&ffmpeg);
-        cmd.args([
-            "-hide_banner", "-loglevel", "fatal", "-nostats",
-            "-threads", "0",
-        ]);
-
-        if enc_to_use != "cpu" {
-            cmd.args(["-hwaccel", "auto"]);
+        // Encode, measure, and if the file still came out over the target, re-encode
+        // with the video bitrate corrected by how far it missed. Fixed-size presets
+        // (Discord, WhatsApp...) are hard upload limits, so they must not go over at all.
+        let limit_mb = if fixed_target { target_mb } else { target_mb * 1.05 };
+        let audio_mb = audio_kbps as f64 * dur / 8192.0;
+        let mut out_size_mb = 0.0;
+        let mut speed = String::new();
+        for pass in 1..=3u32 {
+            let plan = plan_output(probe.width, probe.height, probe.fps_num, probe.fps_den, vkbps);
+            speed = run_encode(&app, &ffmpeg, &input_path, &output_path, dur, &enc, &probe, vkbps,
+                               &plan, transcode_audio, audio_kbps, pass)?;
+            out_size_mb = std::fs::metadata(&output_path).map(|m| m.len() as f64 / (1024.0 * 1024.0)).unwrap_or(0.0);
+            if out_size_mb <= limit_mb || out_size_mb <= audio_mb { break; }
+            let ratio = ((target_mb * 0.97 - audio_mb) / (out_size_mb - audio_mb)).clamp(0.25, 0.97);
+            vkbps = ((vkbps as f64 * ratio) as u32).max(48);
         }
 
-        cmd.args([
-            "-progress", "pipe:1", "-y",
-            "-i", &input_path,
-            "-map", "0:v:0", "-map", "0:a?",
-        ]);
+        let _ = app.emit("compression-progress", ProgressPayload { path: input_path.clone(), progress: 100.0, speed, eta: "00:00".to_string(), pass: 0 });
 
-        match enc_to_use.as_str() {
-            "nvenc" => { cmd.args(["-c:v","hevc_nvenc","-preset","p4","-tune","hq","-rc","vbr","-b:v",&format!("{}k",vkbps),"-maxrate",&format!("{}k",maxk),"-bufsize",&format!("{}k",bufk),"-pix_fmt","yuv420p","-tag:v","hvc1"]); }
-            "amf"   => { cmd.args(["-c:v","hevc_amf","-usage","transcoding","-quality","balanced","-rc","vbr_peak","-b:v",&format!("{}k",vkbps),"-maxrate",&format!("{}k",maxk),"-pix_fmt","yuv420p","-tag:v","hvc1"]); }
-            "qsv"   => { cmd.args(["-c:v","hevc_qsv","-preset","faster","-b:v",&format!("{}k",vkbps),"-maxrate",&format!("{}k",maxk),"-pix_fmt","nv12","-tag:v","hvc1"]); }
-            _       => {
-                let pix = if probe.is_hdr || probe.is_10bit { "yuv420p10le" } else { "yuv420p" };
-                cmd.args(["-c:v","libx265","-preset","fast","-b:v",&format!("{}k",vkbps),"-pix_fmt",pix,"-tag:v","hvc1"]);
-            }
-        }
-
-        if transcode_audio { cmd.args(["-c:a","aac","-b:a",&format!("{}k",audio_kbps)]); }
-        else               { cmd.args(["-c:a","copy"]); }
-
-        cmd.arg(output_path.to_string_lossy().to_string());
-        cmd.stdout(Stdio::piped()).stderr(Stdio::null());
-        #[cfg(target_os = "windows")] { use std::os::windows::process::CommandExt; cmd.creation_flags(0x08000000); }
-
-        let mut child = cmd.spawn().map_err(|e| format!("FFmpeg spawn error: {}", e))?;
-        { let mut lock = ACTIVE_PID.lock().unwrap(); *lock = Some(child.id()); }
-
-        let stdout = child.stdout.take().ok_or("No FFmpeg stdout")?;
-        let reader = BufReader::new(stdout);
-
-        let start_time  = std::time::Instant::now();
-        let mut last_emit = std::time::Instant::now();
-        let mut current_speed = String::new();
-        let mut current_pct   = 0.0f64;
-
-        for line in reader.lines() {
-            { let lock = ACTIVE_PID.lock().unwrap(); if lock.is_none() { let _ = child.kill(); return Err("Cancelled".into()); } }
-            if let Ok(l) = line {
-                let t = l.trim();
-                if t.starts_with("out_time_us=") || t.starts_with("out_time_ms=") {
-                    if let Ok(v) = t[12..].parse::<f64>() {
-                        current_pct = ((v / 1_000_000.0 / dur) * 100.0).clamp(0.0, 99.5);
-                    }
-                } else if t.starts_with("speed=") {
-                    let s = t[6..].trim();
-                    if s != "N/A" && !s.is_empty() { current_speed = s.to_string(); }
-                } else if t == "progress=continue" || t == "progress=end" {
-                    if last_emit.elapsed().as_millis() >= 120 || t == "progress=end" {
-                        last_emit = std::time::Instant::now();
-                        let elapsed = start_time.elapsed().as_secs_f64();
-                        let eta = if current_pct >= 2.0 && current_pct < 100.0 {
-                            let rem = (elapsed * (100.0 - current_pct) / current_pct).round() as u64;
-                            format!("{:02}:{:02}", rem / 60, rem % 60)
-                        } else { "".to_string() };
-                        let _ = app.emit("compression-progress", ProgressPayload {
-                            path: input_path.clone(),
-                            progress: if t == "progress=end" { 100.0 } else { current_pct },
-                            speed: current_speed.clone(), eta,
-                        });
-                    }
-                }
-            }
-        }
-
-        let status = child.wait().map_err(|e| e.to_string())?;
-        { let mut lock = ACTIVE_PID.lock().unwrap(); *lock = None; }
-        if !status.success() { return Err("FFmpeg failed".into()); }
-
-        let _ = app.emit("compression-progress", ProgressPayload { path: input_path.clone(), progress: 100.0, speed: current_speed, eta: "00:00".to_string() });
-
-        let out_size_mb = std::fs::metadata(&output_path).map(|m| m.len() as f64 / (1024.0 * 1024.0)).unwrap_or(0.0);
         let ratio = if probe.size_mb > 0.0 { (out_size_mb / probe.size_mb) * 100.0 } else { 100.0 };
-
         Ok(CompressionResult { output_path: output_path.to_string_lossy().to_string(), output_size_mb: out_size_mb, compression_ratio_pct: ratio })
     }
+}
+
+/// Output frame rate and height chosen so the video bitrate stays above what the
+/// encoder can honour. Starved of bits, hardware encoders ignore the target: NVENC
+/// landed ~60% over at 1080p60 / 0.003 bits per pixel, while the same budget at
+/// 540p30 hit 98% and looked cleaner.
+struct OutputPlan {
+    height: Option<u32>,
+    fps: Option<String>,
+}
+
+fn plan_output(width: u32, height: u32, fps_num: u32, fps_den: u32, video_kbps: u32) -> OutputPlan {
+    let none = OutputPlan { height: None, fps: None };
+    if width == 0 || height == 0 { return none; }
+    let src_fps = if fps_num > 0 && fps_den > 0 { fps_num as f64 / fps_den as f64 } else { 30.0 };
+    let bpp = |h: u32, f: f64| {
+        let w = width as f64 * h as f64 / height as f64;
+        (video_kbps as f64 * 1000.0) / (w * h as f64 * f)
+    };
+
+    // Drop to ~30 fps first: halving frames costs less than halving resolution.
+    let mut out_fps = src_fps;
+    let mut fps = None;
+    if src_fps > 31.0 && bpp(height, src_fps) < 0.06 {
+        let n = (src_fps / 30.0).round().max(2.0) as u32;
+        out_fps = src_fps / n as f64;
+        fps = Some(format!("{}/{}", fps_num, fps_den * n));
+    }
+
+    // Then step down the resolution ladder until each pixel gets enough bits.
+    let mut out_h = height;
+    for &h in &[2160u32, 1440, 1080, 720, 540, 480, 360, 240] {
+        if bpp(out_h, out_fps) >= 0.025 { break; }
+        if h < out_h { out_h = h; }
+    }
+    OutputPlan { height: if out_h < height { Some(out_h) } else { None }, fps }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_encode(
+    app: &tauri::AppHandle,
+    ffmpeg: &Path,
+    input_path: &str,
+    output_path: &Path,
+    dur: f64,
+    enc: &str,
+    probe: &VideoInfo,
+    vkbps: u32,
+    plan: &OutputPlan,
+    transcode_audio: bool,
+    audio_kbps: u32,
+    pass: u32,
+) -> Result<String, String> {
+    let maxk = vkbps * 3 / 2;
+    let bufk = maxk * 2;
+
+    let mut cmd = Command::new(ffmpeg);
+    cmd.args(["-hide_banner", "-loglevel", "fatal", "-nostats", "-threads", "0"]);
+    if enc != "cpu" { cmd.args(["-hwaccel", "auto"]); }
+    cmd.args(["-progress", "pipe:1", "-y", "-i", input_path, "-map", "0:v:0", "-map", "0:a?"]);
+
+    let mut filters: Vec<String> = Vec::new();
+    if let Some(h) = plan.height { filters.push(format!("scale=-2:{}:flags=lanczos", h)); }
+    if let Some(f) = &plan.fps { filters.push(format!("fps={}", f)); }
+    if !filters.is_empty() { cmd.args(["-vf", &filters.join(",")]); }
+
+    match enc {
+        "nvenc" => { cmd.args(["-c:v","hevc_nvenc","-preset","p4","-tune","hq","-rc","vbr","-b:v",&format!("{}k",vkbps),"-maxrate",&format!("{}k",maxk),"-bufsize",&format!("{}k",bufk),"-pix_fmt","yuv420p","-tag:v","hvc1"]); }
+        "amf"   => { cmd.args(["-c:v","hevc_amf","-usage","transcoding","-quality","balanced","-rc","vbr_peak","-b:v",&format!("{}k",vkbps),"-maxrate",&format!("{}k",maxk),"-pix_fmt","yuv420p","-tag:v","hvc1"]); }
+        "qsv"   => { cmd.args(["-c:v","hevc_qsv","-preset","faster","-b:v",&format!("{}k",vkbps),"-maxrate",&format!("{}k",maxk),"-pix_fmt","nv12","-tag:v","hvc1"]); }
+        _       => {
+            let pix = if probe.is_hdr || probe.is_10bit { "yuv420p10le" } else { "yuv420p" };
+            cmd.args(["-c:v","libx265","-preset","fast","-b:v",&format!("{}k",vkbps),"-pix_fmt",pix,"-tag:v","hvc1"]);
+        }
+    }
+
+    if transcode_audio { cmd.args(["-c:a","aac","-b:a",&format!("{}k",audio_kbps)]); }
+    else               { cmd.args(["-c:a","copy"]); }
+
+    cmd.arg(output_path.to_string_lossy().to_string());
+    cmd.stdout(Stdio::piped()).stderr(Stdio::null());
+    #[cfg(target_os = "windows")] { use std::os::windows::process::CommandExt; cmd.creation_flags(0x08000000); }
+
+    let mut child = cmd.spawn().map_err(|e| format!("FFmpeg spawn error: {}", e))?;
+    { let mut lock = ACTIVE_PID.lock().unwrap(); *lock = Some(child.id()); }
+
+    let stdout = child.stdout.take().ok_or("No FFmpeg stdout")?;
+    let reader = BufReader::new(stdout);
+
+    let start_time = std::time::Instant::now();
+    let mut last_emit = std::time::Instant::now();
+    let mut current_speed = String::new();
+    let mut current_pct = 0.0f64;
+
+    for line in reader.lines() {
+        { let lock = ACTIVE_PID.lock().unwrap(); if lock.is_none() { let _ = child.kill(); return Err("Cancelled".into()); } }
+        if let Ok(l) = line {
+            let t = l.trim();
+            if t.starts_with("out_time_us=") || t.starts_with("out_time_ms=") {
+                if let Ok(v) = t[12..].parse::<f64>() {
+                    current_pct = ((v / 1_000_000.0 / dur) * 100.0).clamp(0.0, 99.5);
+                }
+            } else if t.starts_with("speed=") {
+                let s = t[6..].trim();
+                if s != "N/A" && !s.is_empty() { current_speed = s.to_string(); }
+            } else if (t == "progress=continue" || t == "progress=end")
+                && (last_emit.elapsed().as_millis() >= 120 || t == "progress=end")
+            {
+                last_emit = std::time::Instant::now();
+                let elapsed = start_time.elapsed().as_secs_f64();
+                let eta = if current_pct >= 2.0 && current_pct < 100.0 {
+                    let rem = (elapsed * (100.0 - current_pct) / current_pct).round() as u64;
+                    format!("{:02}:{:02}", rem / 60, rem % 60)
+                } else { "".to_string() };
+                let _ = app.emit("compression-progress", ProgressPayload {
+                    path: input_path.to_string(),
+                    progress: current_pct,
+                    speed: current_speed.clone(),
+                    eta,
+                    pass,
+                });
+            }
+        }
+    }
+
+    let status = child.wait().map_err(|e| e.to_string())?;
+    { let mut lock = ACTIVE_PID.lock().unwrap(); *lock = None; }
+    if !status.success() { return Err("FFmpeg failed".into()); }
+    Ok(current_speed)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -937,4 +1020,37 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn plan_drops_fps_then_resolution_when_starved() {
+        // 1080p59.94 gameplay clip from the overshoot report
+        let p = plan_output(1920, 1080, 60000, 1001, 416); // 15% of 41 MB
+        assert_eq!(p.fps.as_deref(), Some("60000/2002"));
+        assert_eq!(p.height, Some(540));
+        let p = plan_output(1920, 1080, 60000, 1001, 755); // Discord 10 MB
+        assert_eq!(p.height, Some(720));
+        let p = plan_output(1920, 1080, 60000, 1001, 1680); // 50%
+        assert_eq!((p.height, p.fps.is_some()), (None, true));
+    }
+
+    #[test]
+    fn plan_leaves_well_fed_video_alone() {
+        let p = plan_output(1920, 1080, 30, 1, 8000);
+        assert!(p.height.is_none() && p.fps.is_none());
+        let p = plan_output(0, 0, 0, 0, 100); // unknown dimensions: no filters
+        assert!(p.height.is_none() && p.fps.is_none());
+    }
+
+    #[test]
+    fn probe_reads_size_and_rate() {
+        let clip = "../../Apex Legends 2025.01.14 - 00.50.34.08.DVR.mp4";
+        if !Path::new(clip).exists() { return; }
+        let v = get_probed_video(clip).unwrap();
+        assert_eq!((v.width, v.height, v.fps_num, v.fps_den), (1920, 1080, 60000, 1001));
+    }
 }
