@@ -378,10 +378,31 @@ function setView(name) {
 // =============================================
 $("btn-win-minimize").addEventListener("click", () => tauriInvoke("minimize_window").catch(() => {}));
 $("btn-win-close").addEventListener("click", () => tauriInvoke("close_window").catch(() => {}));
+const appWindow = () => window.__TAURI__?.window?.getCurrentWindow?.();
+const toggleMaximize = () => appWindow()?.toggleMaximize().catch(() => {});
+$("btn-win-maximize").addEventListener("click", toggleMaximize);
 $("titlebar").addEventListener("mousedown", (e) => {
   if (e.button !== 0 || e.target.closest("button")) return;
+  if (e.detail === 2) { toggleMaximize(); return; }
   tauriInvoke("start_drag").catch(() => {});
 });
+
+// Edge handles: the window is undecorated, so resizing is driven from here
+const RESIZE_DIRS = { n: "North", s: "South", e: "East", w: "West", ne: "NorthEast", nw: "NorthWest", se: "SouthEast", sw: "SouthWest" };
+Object.entries(RESIZE_DIRS).forEach(([k, dir]) => {
+  const h = document.createElement("div");
+  h.className = `rz rz-${k}`;
+  h.addEventListener("mousedown", (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    appWindow()?.startResizeDragging(dir).catch(() => {});
+  });
+  document.body.appendChild(h);
+});
+async function syncMaximized() {
+  try { document.body.classList.toggle("maxed", !!(await appWindow()?.isMaximized())); } catch {}
+}
+window.addEventListener("resize", syncMaximized);
 
 // =============================================
 // Presets: render, indicator, select, reorder, delete
