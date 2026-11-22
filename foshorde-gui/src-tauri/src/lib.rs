@@ -121,6 +121,28 @@ fn ensure_bin_in_user_path() {
     }
 }
 
+/// Windows 11 draws a light 1px frame around undecorated windows that keep their
+/// shadow. Ask DWM to drop the frame color so the black UI runs edge to edge.
+#[cfg(target_os = "windows")]
+fn remove_window_border(window: &tauri::WebviewWindow) {
+    use windows_sys::Win32::Graphics::Dwm::{
+        DwmSetWindowAttribute, DWMWA_BORDER_COLOR, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
+    };
+    const DWMWA_COLOR_NONE: u32 = 0xFFFF_FFFE;
+    if let Ok(hwnd) = window.hwnd() {
+        let set = |attr: i32, val: u32| unsafe {
+            DwmSetWindowAttribute(
+                hwnd.0 as _,
+                attr as u32,
+                &val as *const u32 as *const _,
+                std::mem::size_of::<u32>() as u32,
+            );
+        };
+        set(DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND as u32);
+        set(DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE);
+    }
+}
+
 fn get_default_output_dir() -> PathBuf {
     if let Ok(exe) = std::env::current_exe() {
         if let Some(parent) = exe.parent() {
@@ -811,6 +833,8 @@ pub fn run() {
                 if let Some(icon) = app.default_window_icon() {
                     let _ = window.set_icon(icon.clone());
                 }
+                #[cfg(target_os = "windows")]
+                remove_window_border(&window);
             }
             Ok(())
         })
