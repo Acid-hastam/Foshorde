@@ -11,8 +11,8 @@
     "windows": [
       {
         "title": "Foshorde",
-        "width": 600,
-        "height": 410,
+        "width": 640,
+        "height": 440,
         "resizable": false,
         "center": true,
         "decorations": false,
