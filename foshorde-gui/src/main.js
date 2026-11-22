@@ -903,6 +903,7 @@ const THEMES = [
   { id: "swiss", name: "Swiss", bg: "#fff", fg: "#111", ac: "#e30613", font: "Helvetica, Arial, sans-serif" },
   { id: "retro", name: "Retro", bg: "#c0c0c0", fg: "#000", ac: "#000080", font: "Tahoma, sans-serif" },
   { id: "blueprint", name: "Blueprint", bg: "#0c3b8c", fg: "#fff", ac: "#bfe1ff", font: "Consolas, monospace" },
+  { id: "clay", name: "Clay", bg: "#e8e3f3", fg: "#2d2a3e", ac: "#7c5cff" },
 ];
 let currentTheme = "void";
 
