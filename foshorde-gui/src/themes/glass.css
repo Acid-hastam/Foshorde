@@ -1,0 +1,129 @@
+/* Aurora: frosted glass over a drifting aurora, liquid blob orb, tilt-in cards */
+body[data-theme="glass"] {
+  --bg: #0b0820;
+  --panel: rgba(255,255,255,.08);
+  --raise: rgba(40,30,90,.9);
+  --line: rgba(255,255,255,.14);
+  --line-2: rgba(255,255,255,.26);
+  --text: #fff;
+  --dim: rgba(255,255,255,.74);
+  --mute: rgba(255,255,255,.46);
+  --accent: #7af0ff;
+  --accent-2: #c6f7ff;
+  --accent-a: rgba(122,240,255,.14);
+  --acc-rgb: 122, 240, 255;
+  --acc2-rgb: 198, 247, 255;
+  --ok: #8dffc8;
+  --hover: rgba(255,255,255,.12);
+  --track: rgba(255,255,255,.16);
+  --r-pill: 16px;
+  --btn-bg: rgba(255,255,255,.94);
+  --btn-fg: #1b1446;
+  --btn-hover-shadow: 0 12px 40px rgba(122,240,255,.35);
+  --chip-on-bg: rgba(255,255,255,.92);
+  --chip-on-fg: #1b1446;
+  --chip-on-shadow: 0 8px 30px rgba(122,240,255,.4);
+  --meter-track: rgba(255,255,255,.12);
+  --meter-fill: linear-gradient(90deg, #7af0ff, #b388ff, #ff8ad8, #7af0ff);
+  --glow: 0 0 22px rgba(179,136,255,.6);
+  --pop-bg: rgba(36,26,84,.55);
+  --fx-dot: 255, 255, 255;
+  --fx-streak: 198, 247, 255;
+  --fx-alpha: .9;
+  background:
+    radial-gradient(38% 50% at 15% 20%, rgba(122,92,255,.6), transparent 70%),
+    radial-gradient(42% 55% at 85% 22%, rgba(0,200,255,.45), transparent 70%),
+    radial-gradient(50% 60% at 60% 100%, rgba(255,80,190,.42), transparent 70%),
+    #0b0820;
+  background-size: 170% 170%;
+  animation: glass-aurora 16s ease-in-out infinite alternate;
+
+  & .spotlight { background: radial-gradient(320px circle at var(--mx, 50%) var(--my, 50%), rgba(255,255,255,.08), transparent 70%); }
+
+  /* rise in on a tilted plane, de-blurring */
+  & .stage { perspective: 1000px; }
+  & .view.enter [data-s] {
+    animation: glass-in .9s cubic-bezier(.16,1,.3,1) both;
+    animation-delay: calc(var(--i, 0) * 70ms);
+  }
+
+  /* liquid blob orb */
+  & .orb {
+    background: linear-gradient(135deg, rgba(255,255,255,.22), rgba(255,255,255,.04));
+    border: 1px solid rgba(255,255,255,.3);
+    backdrop-filter: blur(20px);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.4), 0 30px 60px rgba(0,0,0,.35);
+    animation: glass-blob 9s ease-in-out infinite;
+  }
+  & .orb-ring { display: none; }
+  & .orb-glow { background: radial-gradient(circle, rgba(255,138,216,.45), transparent 65%); }
+  & .drop-title { font-weight: 300; letter-spacing: -.03em; font-size: clamp(30px, 6vmin, 52px); }
+
+  /* frosted cards with a light sweep */
+  & .hero, & .presets {
+    position: relative;
+    overflow: hidden;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 24px;
+    backdrop-filter: blur(24px) saturate(1.5);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.22), 0 20px 50px rgba(0,0,0,.3);
+  }
+  & .hero { padding: 16px 20px 12px; margin-top: clamp(12px, 3vh, 40px); }
+  & .presets { margin: 12px 0 0; padding: 4px; }
+  & .hero::before, & .presets::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(105deg, transparent 35%, rgba(255,255,255,.16) 50%, transparent 65%);
+    transform: translateX(-100%);
+    animation: glass-sweep 6s ease-in-out infinite;
+    pointer-events: none;
+  }
+  & .presets::before { animation-delay: 1.2s; }
+  & .num { font-weight: 200; }
+  & .meter { height: 10px; border-radius: 10px; background: var(--meter-track); }
+  & .meter-fill { background-size: 300% 100%; animation: glass-flow 4s linear infinite; }
+
+  & .chip { background: rgba(255,255,255,.06); border-color: var(--line); backdrop-filter: blur(8px); }
+  & .chip:hover { transform: translateY(-2px); background: rgba(255,255,255,.12); }
+  & .pill-btn { background: rgba(255,255,255,.08); backdrop-filter: blur(10px); }
+  & .go-btn { backdrop-filter: blur(10px); }
+  & .go-btn::before { background: linear-gradient(110deg, transparent 30%, rgba(179,136,255,.4) 50%, transparent 70%); }
+  & .go-arrow { background: linear-gradient(135deg, #7af0ff, #b388ff); color: #1b1446; }
+
+  & .press {
+    border-radius: 50%;
+    background: linear-gradient(135deg, rgba(255,255,255,.22), rgba(255,255,255,.04));
+    border: 1px solid rgba(255,255,255,.3);
+    backdrop-filter: blur(20px);
+    animation: glass-blob 5s ease-in-out infinite;
+  }
+  & .press-logo { width: 70%; height: 70%; }
+  & .shock { border-color: rgba(255,255,255,.6); }
+  & .run-pct { font-weight: 100; text-shadow: 0 0 40px rgba(179,136,255,.6); }
+  & .run-track { height: 8px; border-radius: 8px; background: rgba(255,255,255,.1); }
+  & .run-fill { border-radius: 8px; background-size: 300% 100%; animation: glass-flow 3s linear infinite; }
+  & .done-big { font-weight: 100; }
+  & .done-saved { background: rgba(255,255,255,.1); backdrop-filter: blur(10px); border-color: rgba(141,255,200,.3); }
+
+  & .drawer { border-radius: 20px; backdrop-filter: blur(30px) saturate(1.6); }
+  & .toast { background: rgba(255,255,255,.12); backdrop-filter: blur(20px); }
+}
+
+@keyframes glass-aurora {
+  0% { background-position: 0% 0%; }
+  50% { background-position: 60% 40%; }
+  100% { background-position: 100% 100%; }
+}
+@keyframes glass-in {
+  from { opacity: 0; transform: translateY(30px) rotateX(18deg) scale(.96); filter: blur(12px); }
+  to { opacity: 1; transform: none; filter: none; }
+}
+@keyframes glass-blob {
+  0%, 100% { border-radius: 42% 58% 60% 40% / 45% 45% 55% 55%; }
+  33% { border-radius: 60% 40% 38% 62% / 55% 60% 40% 45%; }
+  66% { border-radius: 38% 62% 55% 45% / 40% 50% 50% 60%; }
+}
+@keyframes glass-sweep { 0%, 55% { transform: translateX(-100%); } 85%, 100% { transform: translateX(100%); } }
+@keyframes glass-flow { to { background-position: 300% 0; } }
