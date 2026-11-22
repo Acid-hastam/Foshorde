@@ -314,11 +314,12 @@ mod commands {
 
     #[tauri::command]
     pub fn show_in_folder(file_path: String) -> Result<(), String> {
-        let p = Path::new(&file_path);
+        let win_path = file_path.replace('/', "\\");
+        let p = Path::new(&win_path);
         if p.exists() {
             #[cfg(target_os = "windows")]
             {
-                let _ = Command::new("explorer").arg(format!("/select,{}", file_path)).spawn();
+                let _ = Command::new("explorer").arg(format!("/select,{}", win_path)).spawn();
             }
             #[cfg(not(target_os = "windows"))]
             {

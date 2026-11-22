@@ -432,16 +432,13 @@ body {
   background-repeat: no-repeat;
   background-position: center;
   background-size: contain;
-  opacity: 0.45;
-  transition: opacity 0.2s ease, transform 0.2s ease;
+  opacity: 0;
+  transition: opacity 0.18s ease, transform 0.18s ease;
   pointer-events: none;
 }
 .preset-card:hover::after {
   opacity: 0.95;
   transform: scale(1.1);
-}
-.preset-card.active::after {
-  opacity: 0.8;
 }
 .btn-del-preset {
   position: absolute;
@@ -729,6 +726,17 @@ body {
   border-color: var(--accent);
   color: var(--accent);
   background: var(--accent-dim);
+}
+.icon-btn.active {
+  border-color: #ffffff;
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.12);
+  box-shadow: 0 0 10px rgba(255, 255, 255, 0.25);
+}
+.icon-btn.active:hover {
+  border-color: #ffffff;
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.18);
 }
 .q-badge {
   position: absolute;

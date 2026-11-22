@@ -151,6 +151,8 @@ const btnUpdateFfmpeg = document.getElementById("btn-update-ffmpeg");
 
 const overlayAddPreset    = document.getElementById("overlay-add-preset");
 const addPresetDragHead   = document.getElementById("add-preset-drag-head");
+const btnToggleQueue      = document.getElementById("btn-toggle-queue");
+const btnToggleSettings   = document.getElementById("btn-toggle-settings");
 const btnToggleAddPreset  = document.getElementById("btn-toggle-add-preset");
 const addPresetName       = document.getElementById("add-preset-name");
 const addModePct          = document.getElementById("add-mode-pct");
@@ -306,17 +308,6 @@ addPresetName?.addEventListener("keydown", (e) => {
   if (e.key === "Enter") {
     e.preventDefault();
     btnConfirmAddPreset?.click();
-  }
-});
-
-btnToggleAddPreset?.addEventListener("click", () => {
-  if (overlayAddPreset.style.display === "flex") {
-    closeOverlay(overlayAddPreset);
-  } else {
-    if (addPresetError) addPresetError.style.display = "none";
-    addPresetName?.classList.remove("has-error");
-    openOverlay(overlayAddPreset);
-    addPresetName?.focus();
   }
 });
 
@@ -1034,18 +1025,47 @@ window.addEventListener("drop", async (e) => {
 });
 
 // =============================================
-// Overlays Toggle
+// Overlays Toggle (Mutual exclusivity & active state lighting)
 // =============================================
+function updateOverlayButtons() {
+  const isSetsOpen  = overlaySets && overlaySets.style.display === "flex";
+  const isQueueOpen = overlayQueue && overlayQueue.style.display === "flex";
+  const isAddOpen   = overlayAddPreset && overlayAddPreset.style.display === "flex";
+
+  btnToggleSettings?.classList.toggle("active", isSetsOpen);
+  btnToggleQueue?.classList.toggle("active", isQueueOpen);
+  btnToggleAddPreset?.classList.toggle("active", isAddOpen);
+}
+
 function openOverlay(el) {
   if (el) el.style.display = "flex";
+  updateOverlayButtons();
 }
+
 function closeOverlay(el) {
   if (el) el.style.display = "none";
+  updateOverlayButtons();
 }
+
 function closeAllOverlays() {
-  closeOverlay(overlayQueue);
-  closeOverlay(overlaySets);
-  closeOverlay(overlayAddPreset);
+  if (overlayQueue) overlayQueue.style.display = "none";
+  if (overlaySets) overlaySets.style.display = "none";
+  if (overlayAddPreset) overlayAddPreset.style.display = "none";
+  updateOverlayButtons();
+}
+
+function toggleOverlay(targetEl, onOpenCallback) {
+  const wasOpen = targetEl && targetEl.style.display === "flex";
+
+  // Requirement 3: If any menu was open and another is clicked, close previous menus and open the clicked one
+  closeAllOverlays();
+
+  if (!wasOpen && targetEl) {
+    targetEl.style.display = "flex";
+    if (onOpenCallback) onOpenCallback();
+  }
+
+  updateOverlayButtons();
 }
 
 document.querySelectorAll(".btn-close-overlay").forEach((btn) => {
@@ -1054,20 +1074,27 @@ document.querySelectorAll(".btn-close-overlay").forEach((btn) => {
   });
 });
 
-document.getElementById("btn-toggle-queue").addEventListener("click", () => {
-  if (overlayQueue.style.display === "flex") {
-    closeOverlay(overlayQueue);
-  } else {
-    openOverlay(overlayQueue);
-  }
+btnToggleSettings?.addEventListener("click", () => {
+  toggleOverlay(overlaySets, () => {
+    initSystem();
+  });
 });
 
-document.getElementById("btn-toggle-settings").addEventListener("click", () => {
-  if (overlaySets.style.display === "flex") {
-    closeOverlay(overlaySets);
-  } else {
-    initSystem();
-    openOverlay(overlaySets);
+btnToggleQueue?.addEventListener("click", () => {
+  toggleOverlay(overlayQueue);
+});
+
+btnToggleAddPreset?.addEventListener("click", () => {
+  toggleOverlay(overlayAddPreset, () => {
+    if (addPresetError) addPresetError.style.display = "none";
+    addPresetName?.classList.remove("has-error");
+    addPresetName?.focus();
+  });
+});
+
+window.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    closeAllOverlays();
   }
 });
 
@@ -1192,14 +1219,10 @@ function renderQueue() {
           ? "Cancelled"
           : f.status;
 
-    const isDone = f.status === "done" && f.outputPath;
-    const nameClass = isDone ? "queue-item-name clickable-file" : "queue-item-name";
-    const nameTitle = isDone ? "Click to open file in Explorer" : f.path;
-
     return `
     <div class="queue-item">
       <div class="queue-item-top">
-        <span class="${nameClass}" data-path="${f.outputPath || f.path}" title="${nameTitle}">${f.filename}</span>
+        <span class="queue-item-name clickable-file" data-path="${f.path}" title="Click to show source file in Explorer: ${f.path}">${f.filename}</span>
         ${!isProcessing ? `<button class="btn-remove-mini" data-idx="${i}">✕</button>` : ""}
       </div>
       <div class="queue-item-meta">
