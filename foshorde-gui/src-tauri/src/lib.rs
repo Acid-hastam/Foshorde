@@ -375,7 +375,7 @@ mod commands {
         let _ = std::fs::remove_file(&temp_zip);
         let _ = std::fs::remove_dir_all(&temp_extract);
 
-        let ps_content = r#"$urls = @(
+        let ps_content = r##"$urls = @(
     'https://s101.picofile.com/d/v0sX07231llWEtEfBz04JvU1R4d4_Q6R-3rLoXYlfJXV0Z1mgOnzMsgnuRImdQQ8xmxkpRMBUNAY2Mk53gVt/ffprobe.zip',
     'https://mirror.ghproxy.com/https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip',
     'https://ghfast.top/https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip',
@@ -387,6 +387,8 @@ mod commands {
 $ZipPath = $args[0]
 $ExtractDir = $args[1]
 $BinDir = $args[2]
+$Inv = [Globalization.CultureInfo]::InvariantCulture
+$Segments = 8
 
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls11 -bor [Net.SecurityProtocolType]::Tls
 try {
@@ -399,86 +401,159 @@ $tarCmd  = (Get-Command 'tar.exe' -ErrorAction SilentlyContinue).Source
 
 $downloadOk = $false
 
+function Start-Hidden([string]$file, [string]$arguments, [bool]$capture = $false) {
+    $pinfo = New-Object System.Diagnostics.ProcessStartInfo
+    $pinfo.FileName = $file
+    $pinfo.Arguments = $arguments
+    $pinfo.UseShellExecute = $false
+    $pinfo.CreateNoWindow = $true
+    if ($capture) { $pinfo.RedirectStandardOutput = $true }
+    return [System.Diagnostics.Process]::Start($pinfo)
+}
+
+function Write-Progress-Line([double]$curr, [double]$total, [double]$speedBytes) {
+    $totalMb = if ($total -gt 0) { [math]::Round($total / 1MB, 1) } else { 92.0 }
+    $divisor = if ($total -gt 0) { $total } else { 92MB }
+    $pct = [math]::Min(98.0, [math]::Round(($curr / $divisor) * 100, 1))
+    $downMb = [math]::Min([math]::Round($curr / 1MB, 1), $totalMb)
+    $speed = [math]::Max(0.1, [math]::Round($speedBytes / 1MB, 1))
+    [Console]::WriteLine([string]::Format($Inv, "PROGRESS:{0}:{1}:{2}:{3} MB/s", $pct, $downMb, $totalMb, $speed))
+}
+
 function Test-ZipFile($path) {
     if (-not (Test-Path $path)) { return $false }
     if ((Get-Item $path).Length -lt 20000000) { return $false }
     if ($tarCmd) {
-        $pinfo = New-Object System.Diagnostics.ProcessStartInfo
-        $pinfo.FileName = $tarCmd
-        $pinfo.Arguments = "-tf `"$path`""
-        $pinfo.UseShellExecute = $false
-        $pinfo.CreateNoWindow = $true
-        $pinfo.RedirectStandardOutput = $true
-        $pinfo.RedirectStandardError = $true
-        $proc = [System.Diagnostics.Process]::Start($pinfo)
-        $proc.WaitForExit(10000)
+        $proc = Start-Hidden $tarCmd "-tf `"$path`"" $true
+        $null = $proc.StandardOutput.ReadToEnd()
+        $proc.WaitForExit(15000) | Out-Null
         return ($proc.ExitCode -eq 0)
     }
     return $true
 }
 
-# If existing zip is corrupt, delete it
-if (Test-Path $ZipPath) {
-    if (-not (Test-ZipFile $ZipPath)) {
-        Remove-Item $ZipPath -Force -ErrorAction SilentlyContinue
-    } else {
-        $downloadOk = $true
+function Get-RemoteSize([string]$u) {
+    try {
+        $hp = Start-Hidden $curlCmd "-L -k -sI --connect-timeout 6 --max-time 10 `"$u`"" $true
+        $headers = $hp.StandardOutput.ReadToEnd()
+        $hp.WaitForExit(12000) | Out-Null
+        # with redirects there is one header block per hop; the last length is the file's
+        $m = [regex]::Matches($headers, '(?im)^content-length:\s*(\d+)')
+        if ($m.Count -gt 0) { return [long]$m[$m.Count - 1].Groups[1].Value }
+    } catch {}
+    return 0
+}
+
+# Fetch a file over several parallel range requests, then stitch the parts
+function Invoke-SegmentedDownload([string]$u, [long]$total, [int]$n) {
+    $seg = [long][math]::Ceiling($total / $n)
+    $parts = @()
+    $procs = @()
+    for ($i = 0; $i -lt $n; $i++) {
+        $s = [long]$i * $seg
+        if ($s -ge $total) { break }
+        $e = [math]::Min($total - 1, $s + $seg - 1)
+        $pf = "$ZipPath.part$i"
+        Remove-Item $pf -Force -ErrorAction SilentlyContinue
+        $procs += Start-Hidden $curlCmd "-L -k -s --connect-timeout 10 --retry 4 --retry-delay 1 --retry-connrefused -r $s-$e -o `"$pf`" `"$u`""
+        $parts += [pscustomobject]@{ File = $pf; Len = ($e - $s + 1) }
+    }
+
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    $lastMs = 0
+    $lastBytes = 0
+    while (@($procs | Where-Object { -not $_.HasExited }).Count -gt 0) {
+        Start-Sleep -Milliseconds 200
+        $curr = 0
+        foreach ($p in $parts) { if (Test-Path $p.File) { $curr += (Get-Item $p.File).Length } }
+        $dt = [math]::Max(0.1, ($sw.ElapsedMilliseconds - $lastMs) / 1000.0)
+        Write-Progress-Line $curr $total (($curr - $lastBytes) / $dt)
+        $lastMs = $sw.ElapsedMilliseconds
+        $lastBytes = $curr
+    }
+
+    $complete = $true
+    foreach ($p in $parts) {
+        if (-not (Test-Path $p.File) -or (Get-Item $p.File).Length -ne $p.Len) { $complete = $false }
+    }
+    if ($complete) {
+        $out = [System.IO.File]::Create($ZipPath)
+        try {
+            foreach ($p in $parts) {
+                $in = [System.IO.File]::OpenRead($p.File)
+                try { $in.CopyTo($out) } finally { $in.Close() }
+            }
+        } finally { $out.Close() }
+    }
+    foreach ($p in $parts) { Remove-Item $p.File -Force -ErrorAction SilentlyContinue }
+    return $complete
+}
+
+function Invoke-SingleDownload([string]$u, [long]$total) {
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    $lastMs = 0
+    $lastBytes = 0
+    $proc = Start-Hidden $curlCmd "-L -k -C - --connect-timeout 10 --retry 3 --retry-delay 1 --retry-connrefused -o `"$ZipPath`" `"$u`""
+    while (-not $proc.HasExited) {
+        Start-Sleep -Milliseconds 200
+        if (Test-Path $ZipPath) {
+            $curr = (Get-Item $ZipPath).Length
+            $dt = [math]::Max(0.1, ($sw.ElapsedMilliseconds - $lastMs) / 1000.0)
+            Write-Progress-Line $curr $total (($curr - $lastBytes) / $dt)
+            $lastMs = $sw.ElapsedMilliseconds
+            $lastBytes = $curr
+        }
     }
 }
 
+# A complete zip left over from an earlier run is reused
+if (Test-Path $ZipPath) {
+    if (Test-ZipFile $ZipPath) { $downloadOk = $true }
+    else { Remove-Item $ZipPath -Force -ErrorAction SilentlyContinue }
+}
+
 if (-not $downloadOk) {
-    foreach ($u in $urls) {
-        # Method 1: curl.exe with resume & retry
+    # Race every mirror at once: each probe pulls the first 2 MB, fastest wins
+    $order = $urls
+    $rangeOk = @{}
+    if ($curlCmd) {
+        [Console]::WriteLine("STAGE:PROBING")
+        $probes = foreach ($u in $urls) {
+            [pscustomobject]@{
+                Url  = $u
+                Proc = Start-Hidden $curlCmd "-L -k -s -o NUL -r 0-2097151 --connect-timeout 5 --max-time 8 -w `"%{speed_download} %{http_code} %{size_download}`" `"$u`"" $true
+            }
+        }
+        $ranked = foreach ($pr in $probes) {
+            try {
+                $out = $pr.Proc.StandardOutput.ReadToEnd()
+                $pr.Proc.WaitForExit(10000) | Out-Null
+                $f = $out.Trim() -split '\s+'
+                $speed = [double]::Parse($f[0], $Inv)
+                $size = [double]::Parse($f[2], $Inv)
+                if (($f[1] -eq '206' -or $f[1] -eq '200') -and $size -gt 100000) {
+                    $rangeOk[$pr.Url] = ($f[1] -eq '206')
+                    [pscustomobject]@{ Url = $pr.Url; Speed = $speed }
+                }
+            } catch {}
+        }
+        $fast = @($ranked | Sort-Object Speed -Descending | ForEach-Object { $_.Url })
+        $order = $fast + @($urls | Where-Object { $fast -notcontains $_ })
+    }
+
+    foreach ($u in $order) {
+        # Method 1: curl, segmented when the mirror honours range requests
         if ($curlCmd) {
             try {
-                # Get real Content-Length before downloading
-                $totalBytes = 0
-                try {
-                    $headProc = New-Object System.Diagnostics.ProcessStartInfo
-                    $headProc.FileName = $curlCmd
-                    $headProc.Arguments = "-L -k -sI --connect-timeout 8 `"$u`""
-                    $headProc.UseShellExecute = $false
-                    $headProc.CreateNoWindow = $true
-                    $headProc.RedirectStandardOutput = $true
-                    $hp = [System.Diagnostics.Process]::Start($headProc)
-                    $headOutput = $hp.StandardOutput.ReadToEnd()
-                    $hp.WaitForExit(10000)
-                    $clMatch = [regex]::Match($headOutput, '(?im)^content-length:\s*(\d+)')
-                    if ($clMatch.Success) { $totalBytes = [long]$clMatch.Groups[1].Value }
-                } catch {}
-                $totalMbCurl = if ($totalBytes -gt 0) { [math]::Round($totalBytes / 1MB, 1) } else { 92.0 }
-
-                $sw = [System.Diagnostics.Stopwatch]::StartNew()
-                $lastEmit = 0
-                $lastBytes = 0
-
-                $pinfo = New-Object System.Diagnostics.ProcessStartInfo
-                $pinfo.FileName = $curlCmd
-                $pinfo.Arguments = "-L -k -C - --connect-timeout 10 --retry 3 --retry-delay 1 --retry-connrefused -o `"$ZipPath`" `"$u`""
-                $pinfo.UseShellExecute = $false
-                $pinfo.CreateNoWindow = $true
-                $proc = [System.Diagnostics.Process]::Start($pinfo)
-
-                while (-not $proc.HasExited) {
-                    Start-Sleep -Milliseconds 200
-                    if (Test-Path $ZipPath) {
-                        $curr = (Get-Item $ZipPath).Length
-                        if ($sw.ElapsedMilliseconds - $lastEmit -ge 150) {
-                            $intervalSec = [math]::Max(0.1, ($sw.ElapsedMilliseconds - $lastEmit) / 1000.0)
-                            $speedBytes = ($curr - $lastBytes) / $intervalSec
-                            $lastEmit = $sw.ElapsedMilliseconds
-                            $lastBytes = $curr
-                            $downMb = [math]::Round($curr / 1MB, 1)
-                            $clampedDown = [math]::Min($downMb, $totalMbCurl)
-                            $divisor = if ($totalBytes -gt 0) { $totalBytes } else { 92MB }
-                            $pct = [math]::Min(98.0, [math]::Round(($curr / $divisor) * 100, 1))
-                            $speed = [math]::Max(0.1, [math]::Round($speedBytes / 1MB, 1))
-                            $msg = "PROGRESS:{0}:{1}:{2}:{3} MB/s" -f $pct, $clampedDown, $totalMbCurl, $speed
-                            [Console]::WriteLine($msg)
-                        }
+                $total = Get-RemoteSize $u
+                if ($rangeOk[$u] -and $total -gt 20MB) {
+                    if ((Invoke-SegmentedDownload $u $total $Segments) -and (Test-ZipFile $ZipPath)) {
+                        $downloadOk = $true
+                        break
                     }
+                    Remove-Item $ZipPath -Force -ErrorAction SilentlyContinue
                 }
-
+                Invoke-SingleDownload $u $total
                 if (Test-ZipFile $ZipPath) {
                     $downloadOk = $true
                     break
@@ -496,10 +571,9 @@ if (-not $downloadOk) {
                 $req.UserAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
                 $resp = $req.GetResponse()
                 $total = $resp.ContentLength
-                $totMb = if ($total -gt 0) { [math]::Round($total / 1MB, 1) } else { 92.0 }
                 $st = $resp.GetResponseStream()
                 $fs = [System.IO.File]::Create($ZipPath)
-                $buf = New-Object byte[] 65536
+                $buf = New-Object byte[] 262144
                 $curr = 0
                 $sw = [System.Diagnostics.Stopwatch]::StartNew()
                 $lastEmit = 0
@@ -508,13 +582,7 @@ if (-not $downloadOk) {
                     $curr += $n
                     if ($sw.ElapsedMilliseconds - $lastEmit -ge 150) {
                         $lastEmit = $sw.ElapsedMilliseconds
-                        $totVal = if ($total -gt 0) { $total } else { 92MB }
-                        $pct = [math]::Min(98.0, [math]::Round(($curr / $totVal) * 100, 1))
-                        $sec = [math]::Max(0.1, $sw.Elapsed.TotalSeconds)
-                        $speed = [math]::Round(($curr / 1MB) / $sec, 1)
-                        $downMb = [math]::Round($curr / 1MB, 1)
-                        $msg = "PROGRESS:{0}:{1}:{2}:{3} MB/s" -f $pct, $downMb, $totMb, $speed
-                        [Console]::WriteLine($msg)
+                        Write-Progress-Line $curr $total ($curr / [math]::Max(0.1, $sw.Elapsed.TotalSeconds))
                     }
                 }
                 $fs.Close(); $st.Close(); $resp.Close()
@@ -537,32 +605,31 @@ if (-not $downloadOk) {
     exit 1
 }
 
-# Extraction via tar.exe or Expand-Archive
+# Extract only the two binaries we need; fall back to the whole archive
 [Console]::WriteLine("STAGE:EXTRACTING")
 if (Test-Path $ExtractDir) { Remove-Item $ExtractDir -Recurse -Force -ErrorAction SilentlyContinue }
 New-Item -ItemType Directory -Path $ExtractDir -Force | Out-Null
 
-$extractSuccess = $false
 if ($tarCmd) {
-    $pinfo = New-Object System.Diagnostics.ProcessStartInfo
-    $pinfo.FileName = $tarCmd
-    $pinfo.Arguments = "-xf `"$ZipPath`" -C `"$ExtractDir`""
-    $pinfo.UseShellExecute = $false
-    $pinfo.CreateNoWindow = $true
-    $proc = [System.Diagnostics.Process]::Start($pinfo)
-    $proc.WaitForExit(60000)
-    $extractSuccess = ($proc.ExitCode -eq 0)
+    $proc = Start-Hidden $tarCmd "-xf `"$ZipPath`" -C `"$ExtractDir`" `"*ffmpeg.exe`" `"*ffprobe.exe`""
+    $proc.WaitForExit(60000) | Out-Null
 }
-
-if (-not $extractSuccess) {
-    try {
-        Expand-Archive -LiteralPath $ZipPath -DestinationPath $ExtractDir -Force
-        $extractSuccess = $true
-    } catch {}
-}
-
 $ffmpegSrc = Get-ChildItem -Path $ExtractDir -Filter "ffmpeg.exe" -Recurse | Select-Object -First 1
 $ffprobeSrc = Get-ChildItem -Path $ExtractDir -Filter "ffprobe.exe" -Recurse | Select-Object -First 1
+
+if (-not $ffmpegSrc -or -not $ffprobeSrc) {
+    $extracted = $false
+    if ($tarCmd) {
+        $proc = Start-Hidden $tarCmd "-xf `"$ZipPath`" -C `"$ExtractDir`""
+        $proc.WaitForExit(120000) | Out-Null
+        $extracted = ($proc.ExitCode -eq 0)
+    }
+    if (-not $extracted) {
+        try { Expand-Archive -LiteralPath $ZipPath -DestinationPath $ExtractDir -Force } catch {}
+    }
+    $ffmpegSrc = Get-ChildItem -Path $ExtractDir -Filter "ffmpeg.exe" -Recurse | Select-Object -First 1
+    $ffprobeSrc = Get-ChildItem -Path $ExtractDir -Filter "ffprobe.exe" -Recurse | Select-Object -First 1
+}
 
 if (-not $ffmpegSrc -or -not $ffprobeSrc) {
     [Console]::WriteLine("RESULT:FAILED_EXTRACTION")
@@ -588,7 +655,7 @@ try {
 
 [Console]::WriteLine("RESULT:SUCCESS")
 exit 0
-"#;
+"##;
 
         std::fs::write(&script_file, ps_content).map_err(|e| e.to_string())?;
 
@@ -642,6 +709,15 @@ exit 0
                             message: format!("Downloading FFmpeg core ({} / {} MB)...", down_mb, tot_mb),
                         });
                     }
+                } else if t == "STAGE:PROBING" {
+                    let _ = app.emit("ffmpeg-download-progress", DownloadProgressPayload {
+                        stage: "connecting".to_string(),
+                        percent: 0.0,
+                        downloaded_mb: 0.0,
+                        total_mb: 90.0,
+                        speed: "".to_string(),
+                        message: "Racing mirrors for the fastest one...".to_string(),
+                    });
                 } else if t == "STAGE:EXTRACTING" {
                     let _ = app.emit("ffmpeg-download-progress", DownloadProgressPayload {
                         stage: "extracting".to_string(),
